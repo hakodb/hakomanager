@@ -1,14 +1,14 @@
 //! Command dispatch. All frontend operations enter through `dispatch`.
 
-mod collection;
-mod document;
+pub(crate) mod collection;
+pub(crate) mod document;
 mod graph;
-mod index;
-mod ops;
-mod ops_v2;
+pub(crate) mod index;
+pub(crate) mod ops;
+pub(crate) mod ops_v2;
 mod query;
 mod sync;
-mod vector;
+pub(crate) mod vector;
 mod workspace;
 
 use crate::adapter_v2::AdvancedAdapter;
@@ -54,6 +54,7 @@ fn handle(request: &Request, state: &mut crate::state::ManagerState) -> Result<V
         op::QUERY_RUN => query::run(args, state),
         op::QUERY_EXPLAIN => query::explain(args, state),
         op::QUERY_AGGREGATE => query::aggregate(args, state),
+        op::QUERY_CONSOLE => query::console(args, state),
 
         op::INDEX_LIST => index::list(args, state),
         op::INDEX_CREATE => index::create(args, state),

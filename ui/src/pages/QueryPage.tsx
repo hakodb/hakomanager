@@ -108,7 +108,18 @@ export function QueryPage({ profileId, collection, collections, onStatus }: Quer
       offset,
     };
     if (orderBy.trim()) {
-      spec.orderBy = orderBy.trim();
+      // Wire shape: Vec<OrderSpec> {field, ascending}; "name:desc" accepted.
+      spec.order_by = orderBy
+        .split(',')
+        .map((part) => part.trim())
+        .filter((part) => part !== '')
+        .map((part) => {
+          const [field, direction] = part.split(':');
+          return {
+            field: field.trim(),
+            ascending: (direction ?? '').trim().toLowerCase() !== 'desc',
+          };
+        });
     }
     if (select.trim()) {
       spec.select = select

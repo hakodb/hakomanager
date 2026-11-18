@@ -96,7 +96,7 @@ export function SettingsPage({ onStatus }: SettingsPageProps) {
         setRelease(info);
         // shortcut: current version is hardcoded; bump it in the same PR as
         // the Cargo.toml/tauri.conf.json version bump on every release
-        const current = '0.1.1';
+        const current = '0.1.2';
         if (isNewerVersion(info.tagName, current)) {
           onStatus(`Update available: ${info.tagName}.`);
         } else if (notifyWhenCurrent) {

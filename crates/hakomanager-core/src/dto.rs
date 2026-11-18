@@ -166,6 +166,7 @@ pub mod op {
     pub const QUERY_RUN: &str = "query.run";
     pub const QUERY_EXPLAIN: &str = "query.explain";
     pub const QUERY_AGGREGATE: &str = "query.aggregate";
+    pub const QUERY_CONSOLE: &str = "query.console";
 
     pub const INDEX_LIST: &str = "index.list";
     pub const INDEX_CREATE: &str = "index.create";

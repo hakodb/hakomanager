@@ -644,3 +644,116 @@ button {
   outline: var(--hairline) solid var(--color-accent);
   outline-offset: -1px;
 }
+
+/* Console page */
+.console-input-row {
+  display: flex;
+  gap: 6px;
+  position: relative;
+}
+
+.console-input {
+  flex: 1 1 auto;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: var(--hairline) solid var(--color-border-strong);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.console-input:focus {
+  outline: var(--hairline) solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.console-suggestions {
+  position: absolute;
+  z-index: 30;
+  margin: 2px 0 0;
+  padding: 2px 0;
+  list-style: none;
+  min-width: 320px;
+  max-width: 560px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--color-surface);
+  border: var(--hairline) solid var(--color-border-strong);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.console-suggestions li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.console-suggestions li.suggestion-active,
+.console-suggestions li:hover {
+  background: var(--color-surface-alt);
+}
+
+.suggestion-label {
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+}
+
+.suggestion-detail {
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.console-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.console-entry {
+  border: var(--hairline) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.console-entry summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.console-entry summary code {
+  font-family: var(--font-mono);
+  color: var(--color-text);
+}
+
+.console-entry .console-json {
+  margin: 0;
+  padding: 6px 10px;
+  border-top: var(--hairline) solid var(--color-border);
+  max-height: 260px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+}
+
+.console-ok {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.console-error {
+  color: #d9534f;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

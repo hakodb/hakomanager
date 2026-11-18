@@ -7,6 +7,7 @@ import { TitleBar } from './components/TitleBar';
 import { Toolbar } from './components/Toolbar';
 import { WatchFeed } from './components/WatchFeed';
 import { CollectionsPage } from './pages/CollectionsPage';
+import { ConsolePage } from './pages/ConsolePage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { GraphPage } from './pages/GraphPage';
 import { IndexesPage } from './pages/IndexesPage';
@@ -30,6 +31,7 @@ const TABS: { id: AppTab; label: string }[] = [
   { id: 'collections', label: 'Collections' },
   { id: 'documents', label: 'Documents' },
   { id: 'query', label: 'Query' },
+  { id: 'console', label: 'Console' },
   { id: 'indexes', label: 'Indexes' },
   { id: 'vector', label: 'Vector' },
   { id: 'graph', label: 'Graph' },
@@ -185,6 +187,13 @@ export default function App() {
                 <QueryPage
                   profileId={activeProfileId}
                   collection={activeCollection}
+                  collections={collections}
+                  onStatus={setStatus}
+                />
+              )}
+              {activeTab === 'console' && (
+                <ConsolePage
+                  profileId={activeProfileId}
                   collections={collections}
                   onStatus={setStatus}
                 />

@@ -1,0 +1,115 @@
+# Release: desktop binaries on every `v*` tag (+ manual dispatch).
+#
+# Ships FLAT binaries, not installers (same tradeoff as hakobackend): the
+# exe is self-contained (the React UI is embedded by tauri's context macro
+# at compile time), so "installer" means "put the exe somewhere and run it".
+# Bundle installers (msi/nsis) can come later if a real installer is wanted;
+# flat exes avoid the codesign/wix moving parts entirely.
+#
+# Asset name is the contract (docs/README may point at these):
+#   hakomanager-<tag>-windows-x86_64.zip      containing hakomanager.exe
+#   hakomanager-<tag>-linux-x86_64.tar.gz     containing hakomanager
+#
+# Linux needs webkit2gtk-4.1 dev packages at build time (runtime keeps the
+# same requirement); windows is dependency-free.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.asset }}-x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: windows
+            artifact: hakomanager.exe
+            archive: hakomanager-${{ github.ref_name }}-windows-x86_64.zip
+          - os: ubuntu-22.04
+            asset: linux
+            artifact: hakomanager
+            archive: hakomanager-${{ github.ref_name }}-linux-x86_64.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # The linux runner carries webkit2gtk by default on 22.04 for tauri
+      # v1 only; v2 needs the 4.1 packages explicitly.
+      - name: install linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: build ui
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: build (windows)
+        if: runner.os == 'Windows'
+        run: cargo build --release --locked -p hakomanager-tauri
+
+      - name: build (linux)
+        if: runner.os == 'Linux'
+        run: cargo build --release --locked -p hakomanager-tauri
+
+      - name: stage (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force stage | Out-Null
+          Copy-Item target/release/hakomanager.exe stage/${{ matrix.artifact }}
+          Copy-Item README.md stage/
+          Compress-Archive -Path stage/* -DestinationPath ${{ matrix.archive }}
+
+      - name: stage (linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p stage
+          cp target/release/hakomanager stage/
+          cp README.md stage/
+          tar -czf ${{ matrix.archive }} -C stage .
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}-x86_64
+          path: ${{ matrix.archive }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: assets
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*
+          generate_release_notes: true

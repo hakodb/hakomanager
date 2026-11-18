@@ -6,7 +6,6 @@
 //! core are pushed back to the UI as `hako://change` events by [`watch_bridge`].
 
 use hakomanager_core::dispatch_json;
-use tauri::Manager;
 
 mod watch_bridge;
 

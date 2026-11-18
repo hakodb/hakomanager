@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '../api/client';
-import { DataGrid, type DataGridColumn } from '../components/DataGrid';
+import { DocumentList } from '../components/DocumentList';
 import { JsonEditor } from '../components/JsonEditor';
 import { errorMessage, isDocumentView, type CollectionInfo, type DocumentView } from '../types';
 
@@ -8,18 +8,16 @@ interface DocumentsPageProps {
   profileId: string | null;
   collection: string | null;
   collections: CollectionInfo[];
+  focusDocId?: string | null;
+  newDocToken?: number;
+  deleteToken?: number;
   onCollectionChange: (name: string) => void;
   onStatus: (message: string) => void;
 }
 
-const columns: DataGridColumn[] = [
-  { key: 'id', label: 'ID' },
-  { key: 'data', label: 'Data' },
-];
-
-function serializeData(data: unknown): string {
+function serializePretty(data: unknown): string {
   try {
-    return JSON.stringify(data) ?? 'null';
+    return JSON.stringify(data, null, 2) ?? 'null';
   } catch {
     return String(data);
   }
@@ -29,6 +27,9 @@ export function DocumentsPage({
   profileId,
   collection,
   collections,
+  focusDocId = null,
+  newDocToken = 0,
+  deleteToken = 0,
   onCollectionChange,
   onStatus,
 }: DocumentsPageProps) {
@@ -57,8 +58,7 @@ export function DocumentsPage({
         limit,
         offset: atOffset,
       });
-      const list = Array.isArray(raw) ? raw.filter(isDocumentView) : [];
-      setDocuments(list);
+      setDocuments(Array.isArray(raw) ? raw.filter(isDocumentView) : []);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -75,13 +75,63 @@ export function DocumentsPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, collection]);
 
-  const rows: Record<string, unknown>[] = documents.map((document) => ({
-    id: document.id,
-    data: serializeData(document.data),
-  }));
+  // A row clicked in Query/Console/Collections opens the shared editor here.
+  useEffect(() => {
+    if (!focusDocId || !ready) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const doc = await invoke<unknown>('document.get', {
+          profileId,
+          collection,
+          id: focusDocId,
+        });
+        if (cancelled) return;
+        const view = (doc ?? {}) as { data?: unknown };
+        setSelectedId(focusDocId);
+        setIdText(focusDocId);
+        setEditorText(serializePretty(view.data ?? view));
+        setError('');
+      } catch (caught) {
+        if (!cancelled) setError(errorMessage(caught));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusDocId, profileId, collection]);
 
-  function handleRowClick(row: Record<string, unknown>) {
-    const id = String(row.id);
+  useEffect(() => {
+    if (newDocToken === 0) return;
+    setSelectedId(null);
+    setIdText('');
+    setEditorText('{\n  \n}');
+    setError('');
+  }, [newDocToken]);
+
+  useEffect(() => {
+    if (deleteToken === 0) return;
+    const id = idText.trim() || selectedId;
+    if (!id) {
+      setError('Select a document before deleting.');
+      return;
+    }
+    void (async () => {
+      setError('');
+      try {
+        await invoke('document.delete', { profileId, collection, id, force: false });
+        setSelectedId(null);
+        setIdText('');
+        setEditorText('');
+        await loadDocuments();
+        onStatus(`Soft-deleted document ${id}.`);
+      } catch (caught) {
+        setError(errorMessage(caught));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deleteToken]);
+
+  function openDocument(id: string) {
     const match = documents.find((document) => document.id === id);
     setSelectedId(id);
     setIdText(id);
@@ -151,13 +201,6 @@ export function DocumentsPage({
     }
   }
 
-  function newDocument() {
-    setSelectedId(null);
-    setIdText('');
-    setEditorText('{\n  \n}');
-    setError('');
-  }
-
   function pageBy(delta: number) {
     const next = Math.max(0, offset + delta);
     setOffset(next);
@@ -209,16 +252,8 @@ export function DocumentsPage({
           >
             Previous
           </button>
-          <button
-            type="button"
-            className="button"
-            disabled={!ready || loading}
-            onClick={() => pageBy(limit)}
-          >
+          <button type="button" className="button" disabled={!ready || loading} onClick={() => pageBy(limit)}>
             Next
-          </button>
-          <button type="button" className="button" onClick={newDocument}>
-            New document
           </button>
         </div>
         {!ready && <div className="inline-note">Open a database and select a collection to load documents.</div>}
@@ -231,9 +266,12 @@ export function DocumentsPage({
             Documents{selectedId ? `: ${selectedId}` : ''}
           </div>
           <div className="panel-body">
-            <div className="grid-scroll">
-              <DataGrid columns={columns} rows={rows} onRowClick={handleRowClick} />
-            </div>
+            <DocumentList
+              documents={documents}
+              onOpenDocument={openDocument}
+              onStatus={onStatus}
+              busy={loading}
+            />
           </div>
         </div>
 
@@ -272,12 +310,4 @@ export function DocumentsPage({
       </section>
     </div>
   );
-}
-
-function serializePretty(data: unknown): string {
-  try {
-    return JSON.stringify(data, null, 2) ?? 'null';
-  } catch {
-    return String(data);
-  }
 }

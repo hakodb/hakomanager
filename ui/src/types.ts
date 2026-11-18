@@ -17,6 +17,88 @@ export interface Request {
   args: unknown;
 }
 
+export interface ConsoleRow {
+  command: string;
+  result: unknown;
+  error: string | null;
+  at: string;
+}
+
+export interface PersistedSession {
+  activeTab: AppTab;
+  activeProfileId: string | null;
+  activeCollection: string | null;
+  databases: Array<{
+    path: string;
+    name: string;
+    readOnly: boolean;
+    encrypted: boolean;
+  }>;
+}
+
+const SESSION_KEY = 'hakomanager.session.v1';
+const CONSOLE_INPUT_KEY = 'hakomanager.console.input';
+const CONSOLE_ROWS_KEY = 'hakomanager.console.rows';
+const MAX_CONSOLE_ROWS = 12;
+
+export function loadSession(): PersistedSession | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedSession>;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      activeTab: parsed.activeTab ?? 'workspace',
+      activeProfileId: parsed.activeProfileId ?? null,
+      activeCollection: parsed.activeCollection ?? null,
+      databases: Array.isArray(parsed.databases) ? parsed.databases : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveSession(session: PersistedSession): void {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch {
+    // Quota / privacy mode: session stays in-memory for this run.
+  }
+}
+
+export function loadConsoleState(): { input: string; rows: ConsoleRow[] } {
+  try {
+    const input = localStorage.getItem(CONSOLE_INPUT_KEY) ?? '';
+    const raw = localStorage.getItem(CONSOLE_ROWS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    const rows: ConsoleRow[] = Array.isArray(parsed)
+      ? parsed.filter(
+          (row): row is ConsoleRow =>
+            typeof row === 'object' && row !== null && typeof row.command === 'string',
+        )
+      : [];
+    return { input, rows: rows.slice(0, MAX_CONSOLE_ROWS) };
+  } catch {
+    return { input: '', rows: [] };
+  }
+}
+
+export function saveConsoleState(input: string, rows: ConsoleRow[]): void {
+  const trimmed = rows.slice(0, MAX_CONSOLE_ROWS);
+  try {
+    localStorage.setItem(CONSOLE_INPUT_KEY, input);
+    // Cap payload: huge result sets must not blow the localStorage quota.
+    let payload = JSON.stringify(trimmed);
+    while (payload.length > 500_000 && trimmed.length > 1) {
+      trimmed.pop();
+      payload = JSON.stringify(trimmed);
+    }
+    localStorage.setItem(CONSOLE_ROWS_KEY, payload);
+  } catch {
+    // Ignore: console history is best-effort.
+  }
+}
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

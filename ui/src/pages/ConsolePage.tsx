@@ -1,11 +1,20 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '../api/client';
 import { DataGrid, type DataGridColumn } from '../components/DataGrid';
-import { errorMessage, type CollectionInfo } from '../types';
+import { DocumentList } from '../components/DocumentList';
+import {
+  errorMessage,
+  loadConsoleState,
+  saveConsoleState,
+  type CollectionInfo,
+  type ConsoleRow,
+  type DocumentView,
+} from '../types';
 
 interface ConsolePageProps {
   profileId: string | null;
   collections: CollectionInfo[];
+  onOpenDocument: (id: string, collection?: string) => void;
   onStatus: (message: string) => void;
 }
 
@@ -62,21 +71,21 @@ function loadHistory(): string[] {
   }
 }
 
-interface ConsoleRow {
-  command: string;
-  result: unknown;
-  error: string | null;
-  at: string;
-}
-
-export function ConsolePage({ profileId, collections, onStatus }: ConsolePageProps) {
-  const [input, setInput] = useState('');
+export function ConsolePage({ profileId, collections, onOpenDocument, onStatus }: ConsolePageProps) {
+  const [input, setInput] = useState(() => loadConsoleState().input);
   const [history, setHistory] = useState<string[]>(loadHistory);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
-  const [rows, setRows] = useState<ConsoleRow[]>([]);
+  const [rows, setRows] = useState<ConsoleRow[]>(() => loadConsoleState().rows);
   const [busy, setBusy] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Persist the in-progress query and results so the console survives a
+  // restart (capped payload in saveConsoleState).
+  useEffect(() => {
+    const timer = window.setTimeout(() => saveConsoleState(input, rows), 300);
+    return () => window.clearTimeout(timer);
+  }, [input, rows]);
 
   const suggestions = useMemo<Suggestion[]>(() => {
     const caret = inputRef.current?.selectionStart ?? input.length;
@@ -232,27 +241,35 @@ export function ConsolePage({ profileId, collections, onStatus }: ConsolePagePro
     }
   }
 
-  function renderResult(result: unknown): { grid: Record<string, unknown>[] | null; columns: DataGridColumn[] } {
+  function renderResult(result: unknown): {
+    documents: DocumentView[] | null;
+    grid: Record<string, unknown>[] | null;
+    columns: DataGridColumn[];
+  } {
     if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'object' && result[0] !== null) {
-      const rows = result.filter(
+      const objects = result.filter(
         (row): row is Record<string, unknown> => typeof row === 'object' && row !== null,
       );
-      return { grid: rows, columns: gridColumns(rows[0]) };
+      const looksLikeDocuments = objects.every((row) => 'id' in row && 'data' in row);
+      if (looksLikeDocuments) {
+        return {
+          documents: objects.map((row) => ({
+            collection: typeof row.collection === 'string' ? row.collection : '',
+            id: String(row.id),
+            data: row.data,
+          })),
+          grid: null,
+          columns: [],
+        };
+      }
+      return { documents: null, grid: objects, columns: gridColumns(objects[0]) };
     }
-    return { grid: null, columns: [] };
+    return { documents: null, grid: null, columns: [] };
   }
 
   return (
     <section className="page">
-      <header className="page-header">
-        <h2>Console</h2>
-        <p className="page-hint">
-          Fluent queries (<code>products.where(price,gte,10000).orderBy(name).limit(10).select(name,price)</code>)
-          and commands (<code>collections</code>, <code>docs &lt;collection&gt;</code>, <code>get &lt;collection&gt; &lt;id&gt;</code>, <code>put</code>, <code>del</code>, <code>stats</code>, <code>indexes</code>, <code>compact</code>, <code>backup</code>, <code>search</code>...)
-        </p>
-      </header>
       <div className="page-section">
-        <h2 className="section-title">Console</h2>
         <p className="page-hint">
           Fluent queries (<code>products.where(price,gte,10000).orderBy(name).limit(10).select(name,price)</code>)
           and commands (<code>collections</code>, <code>docs &lt;collection&gt;</code>, <code>get &lt;collection&gt; &lt;id&gt;</code>, <code>put</code>, <code>del</code>, <code>stats</code>, <code>indexes</code>, <code>compact</code>, <code>backup</code>, <code>search</code>...).
@@ -309,14 +326,20 @@ export function ConsolePage({ profileId, collections, onStatus }: ConsolePagePro
       <div className="console-history">
         {rows.length === 0 && <p className="page-hint">No commands yet.</p>}
         {rows.map((row, index) => {
-          const { grid, columns } = renderResult(row.result);
+          const { documents, grid, columns } = renderResult(row.result);
           return (
             <details key={`${row.at}-${index}`} open={index === 0} className="console-entry">
               <summary>
                 <code>{row.command}</code>
                 {row.error ? <span className="console-error">✗ {row.error}</span> : <span className="console-ok">✓ {row.at}</span>}
               </summary>
-              {grid ? (
+              {documents ? (
+                <DocumentList
+                  documents={documents}
+                  onOpenDocument={(id, fromRow) => onOpenDocument(id, fromRow || documents[0]?.collection)}
+                  onStatus={onStatus}
+                />
+              ) : grid ? (
                 <DataGrid columns={columns} rows={grid} />
               ) : (
                 <pre className="console-json">{JSON.stringify(row.result ?? row.error, null, 2)}</pre>

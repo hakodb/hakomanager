@@ -4,6 +4,10 @@
   "description": "Default capability for the HakoManager main window.",
   "windows": ["main"],
   "permissions": [
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:allow-restart",
     "core:default",
     "dialog:allow-open",
     "dialog:allow-save",

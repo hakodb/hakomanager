@@ -1,14 +1,14 @@
-# Release: desktop binaries on every `v*` tag (+ manual dispatch).
+# Release: flat binaries + signed installers + updater manifest on every `v*` tag.
 #
-# Ships FLAT binaries, not installers (same tradeoff as hakobackend): the
-# exe is self-contained (the React UI is embedded by tauri's context macro
-# at compile time), so "installer" means "put the exe somewhere and run it".
-# Bundle installers (msi/nsis) can come later if a real installer is wanted;
-# flat exes avoid the codesign/wix moving parts entirely.
-#
-# Asset name is the contract (docs/README may point at these):
+# The flat archives stay for users who prefer a self-contained binary:
 #   hakomanager-<tag>-windows-x86_64.zip      containing hakomanager.exe
 #   hakomanager-<tag>-linux-x86_64.tar.gz     containing hakomanager
+# Installers (NSIS setup.exe + msi on Windows, deb + AppImage on Linux) are
+# built by `tauri build` and signed with TAURI_SIGNING_PRIVATE_KEY; their .sig
+# files feed latest.json so the in-app updater can verify downloads.
+#
+# Windows installMode is "passive": once the user approves the update in the
+# app, the setup runs without installer UI and the app relaunches.
 #
 # Linux needs webkit2gtk-4.1 dev packages at build time (runtime keeps the
 # same requirement); windows is dependency-free.
@@ -52,6 +52,10 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
+      - name: install frontend dependencies
+        working-directory: ui
+        run: npm ci
+
       # The linux runner carries webkit2gtk by default on 22.04 for tauri
       # v1 only; v2 needs the 4.1 packages explicitly.
       - name: install linux deps
@@ -60,44 +64,52 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - name: build ui
-        working-directory: ui
-        run: |
-          npm ci
-          npm run build
-
-      # custom-protocol embeds the production UI into the exe; without it the
-      # binary is a dev-flavored build that loads the vite dev server URL.
-      - name: build (windows)
+      # `tauri build` runs `npm run build` itself (beforeBuildCommand) and
+      # produces the bundles + their updater signatures. The config lives in
+      # crates/hakomanager-tauri, so invoke the CLI from the repo root.
+      - name: build bundles (windows)
         if: runner.os == 'Windows'
-        run: cargo build --release --locked -p hakomanager-tauri --features custom-protocol
+        shell: pwsh
+        run: & './ui/node_modules/.bin/tauri.cmd' build --config 'crates/hakomanager-tauri/tauri.conf.json'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
-      - name: build (linux)
+      - name: build bundles (linux)
         if: runner.os == 'Linux'
-        run: cargo build --release --locked -p hakomanager-tauri --features custom-protocol
+        run: ./ui/node_modules/.bin/tauri build --config crates/hakomanager-tauri/tauri.conf.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
       - name: stage (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force stage | Out-Null
+          New-Item -ItemType Directory -Force stage, assets | Out-Null
           Copy-Item target/release/hakomanager.exe stage/${{ matrix.artifact }}
           Copy-Item README.md stage/
           Compress-Archive -Path stage/* -DestinationPath ${{ matrix.archive }}
+          Copy-Item ${{ matrix.archive }} assets/
+          Get-ChildItem target/release/bundle -Recurse -File |
+            Where-Object { $_.Extension -in '.exe', '.msi', '.sig' } |
+            ForEach-Object { Copy-Item $_.FullName assets/ }
+          Get-ChildItem assets | ForEach-Object Name
 
       - name: stage (linux)
         if: runner.os == 'Linux'
         run: |
-          mkdir -p stage
+          mkdir -p stage assets
           cp target/release/hakomanager stage/
           cp README.md stage/
           tar -czf ${{ matrix.archive }} -C stage .
+          cp ${{ matrix.archive }} assets/
+          find target/release/bundle -type f \( -name '*.deb' -o -name '*.AppImage' -o -name '*.sig' \) -exec cp {} assets/ \;
+          ls -1 assets
 
       - name: upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}-x86_64
-          path: ${{ matrix.archive }}
+          path: assets/*
 
   release:
     needs: build
@@ -110,6 +122,33 @@ jobs:
         with:
           merge-multiple: true
           path: assets
+
+      - name: build updater manifest
+        shell: bash
+        run: |
+          cd assets
+          version="${GITHUB_REF_NAME#v}"
+          win_setup=$(find . -maxdepth 1 -name '*-setup.exe' | head -n1)
+          win_sig=$(find . -maxdepth 1 -name '*-setup.exe.sig' | head -n1)
+          lin_deb=$(find . -maxdepth 1 -name '*.deb' | head -n1)
+          lin_sig=$(find . -maxdepth 1 -name '*.deb.sig' | head -n1)
+          if [ -z "$win_setup" ] || [ -z "$win_sig" ] || [ -z "$lin_deb" ] || [ -z "$lin_sig" ]; then
+            echo "::error::missing installer or signature artifacts"; ls -1; exit 1
+          fi
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          jq -n \
+            --arg version "$version" \
+            --arg notes "HakoManager $version" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg wurl "$base/$(basename "$win_setup")" \
+            --arg wsig "$(cat "$win_sig")" \
+            --arg lurl "$base/$(basename "$lin_deb")" \
+            --arg lsig "$(cat "$lin_sig")" \
+            '{version:$version, notes:$notes, pub_date:$pub_date,
+              platforms:{
+                "windows-x86_64":{signature:$wsig, url:$wurl},
+                "linux-x86_64":{signature:$lsig, url:$lurl}}}' > latest.json
+          jq '{version, platforms: (.platforms | keys)}' latest.json
 
       - uses: softprops/action-gh-release@v2
         with:

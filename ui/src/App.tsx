@@ -4,6 +4,7 @@ import { IconRail } from './components/IconRail';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar } from './components/StatusBar';
 import { TitleBar } from './components/TitleBar';
+import { UpdateBootstrap } from './updater';
 import { WatchFeed } from './components/WatchFeed';
 import { CollectionsPage } from './pages/CollectionsPage';
 import { ConsolePage } from './pages/ConsolePage';
@@ -307,6 +308,7 @@ export default function App() {
         </main>
       </div>
       <StatusBar message={status} context={context} />
+      <UpdateBootstrap />
     </div>
   );
 }

@@ -27,6 +27,14 @@ crates/hakomanager-tauri  Tauri 2 shell (one hako_exec command gate)
 ui/                       React + TypeScript + Vite frontend
 ```
 
+## Install & updates
+
+Each release ships a Windows `*-setup.exe` (NSIS) and `.msi`, a Linux `.deb` and
+`.AppImage`, plus flat zip/tar.gz binaries. Installers carry updater signatures;
+the app checks `latest.json` at startup (toggle in Settings) and, with your
+approval, downloads and runs a passive setup update, then restarts. Releases
+are at <https://github.com/hakodb/hakomanager/releases>.
+
 ## Prerequisites
 
 - Rust toolchain with `clippy` and `rustfmt` components.

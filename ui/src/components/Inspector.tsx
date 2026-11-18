@@ -7,7 +7,7 @@ interface InspectorProps {
 
 export function Inspector({ profile = null, collection = null }: InspectorProps) {
   return (
-    <aside className="inspector" aria-label="Inspector">
+    <div className="inspector" aria-label="Inspector">
       <div className="inspector-header">Inspector</div>
       <div className="inspector-body">
         {!profile ? (
@@ -59,6 +59,6 @@ export function Inspector({ profile = null, collection = null }: InspectorProps)
           </table>
         )}
       </div>
-    </aside>
+    </div>
   );
 }

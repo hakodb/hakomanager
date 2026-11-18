@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '../api/client';
-import { DataGrid, type DataGridColumn } from '../components/DataGrid';
+import { DocumentList } from '../components/DocumentList';
 import { JsonEditor } from '../components/JsonEditor';
-import { errorMessage, type CollectionInfo } from '../types';
+import { errorMessage, type CollectionInfo, type DocumentView } from '../types';
 
 interface QueryPageProps {
   profileId: string | null;
   collection: string | null;
   collections: CollectionInfo[];
+  onOpenDocument: (id: string, collection?: string) => void;
   onStatus: (message: string) => void;
 }
 
@@ -62,26 +63,13 @@ function normalizeRows(raw: unknown): Record<string, unknown>[] {
   return [];
 }
 
-function columnsForRows(rows: Record<string, unknown>[]): DataGridColumn[] {
-  const keys: string[] = [];
-  for (const row of rows.slice(0, 5)) {
-    for (const key of Object.keys(row)) {
-      if (!keys.includes(key)) {
-        keys.push(key);
-      }
-    }
-  }
-  return keys.map((key) => ({ key, label: key }));
-}
-
-export function QueryPage({ profileId, collection, collections, onStatus }: QueryPageProps) {
+export function QueryPage({ profileId, collection, collections, onOpenDocument, onStatus }: QueryPageProps) {
   const [collectionName, setCollectionName] = useState(collection ?? '');
   const [filters, setFilters] = useState<FilterRow[]>([{ field: '', op: 'eq', value: '' }]);
   const [orderBy, setOrderBy] = useState('');
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
   const [select, setSelect] = useState('');
-  const [rawJson, setRawJson] = useState(false);
   const [rawResult, setRawResult] = useState<unknown>(null);
   const [explainText, setExplainText] = useState('');
   const [error, setError] = useState('');
@@ -181,7 +169,11 @@ export function QueryPage({ profileId, collection, collections, onStatus }: Quer
   }
 
   const rows = normalizeRows(rawResult);
-  const resultColumns = columnsForRows(rows);
+  const documents: DocumentView[] = rows.map((row, index) => ({
+    collection: typeof row.collection === 'string' ? row.collection : collectionName,
+    id: typeof row.id === 'string' ? row.id : String(index),
+    data: 'data' in row ? row.data : row,
+  }));
 
   return (
     <div>
@@ -241,10 +233,6 @@ export function QueryPage({ profileId, collection, collections, onStatus }: Quer
           <button type="button" className="button" disabled={busy} onClick={() => void explainQuery()}>
             Explain
           </button>
-          <label className="field-checkbox">
-            <input type="checkbox" checked={rawJson} onChange={(event) => setRawJson(event.target.checked)} />
-            Raw JSON
-          </label>
         </div>
         {error && <div className="inline-error">{error}</div>}
         {!profileId && <div className="inline-note">Open a database on the Workspace tab before running queries.</div>}
@@ -322,19 +310,13 @@ export function QueryPage({ profileId, collection, collections, onStatus }: Quer
         <div className="panel">
           <div className="panel-header">Results</div>
           <div className="panel-body">
-            {rawJson ? (
-              <div className="json-view">
-                <JsonEditor
-                  value={JSON.stringify(rawResult, null, 2) ?? 'null'}
-                  onChange={() => undefined}
-                  readOnly
-                />
-              </div>
-            ) : (
-              <div className="grid-scroll">
-                <DataGrid columns={resultColumns} rows={rows} />
-              </div>
-            )}
+            <DocumentList
+              documents={documents}
+              onOpenDocument={(id) => onOpenDocument(id, collectionName)}
+              onStatus={onStatus}
+              title="Results"
+              busy={busy}
+            />
           </div>
         </div>
       </section>

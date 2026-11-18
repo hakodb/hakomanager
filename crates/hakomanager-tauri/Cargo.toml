@@ -1,0 +1,23 @@
+[package]
+name = "hakomanager-tauri"
+version = "0.1.0"
+edition = "2021"
+description = "Tauri 2 desktop shell for HakoManager"
+
+[lib]
+crate-type = ["lib"]
+
+[[bin]]
+name = "hakomanager"
+path = "src/main.rs"
+
+[dependencies]
+hakomanager-core = { path = "../hakomanager-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+crossbeam-channel = "0.5"
+serde_json = "1"
+
+[build-dependencies]
+tauri-build = "2"

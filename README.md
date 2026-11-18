@@ -1,0 +1,83 @@
+# HakoManager
+
+Desktop database manager for local [HakoDB](https://github.com/hakodb/hakodb) embedded
+database directories. Built with a UI-independent Rust core, a Tauri 2 shell and a
+React + TypeScript frontend.
+
+## Status
+
+v0.1 MVP (browse, CRUD, query, indexes) and v0.2 (vector playground, graph
+explorer, operations dashboard, sync monitor, live watch) are implemented.
+The Tauri shell is scaffolded but desktop testing is deferred to a Windows
+machine. See [`PLAN.md`](PLAN.md) for scope and milestones.
+
+## Decisions
+
+- Engine: `hakodb 0.21.0` (Rust crate, used directly; no C ABI in the manager path).
+- Target: local embedded database files, not the cloud hub.
+- UI: Tauri 2 desktop, React + TypeScript + Vite.
+- Style: flat, square corners, professional office-like desktop application.
+- All project text is English.
+
+## Layout
+
+```
+crates/hakomanager-core   command dispatch, DTOs, engine adapter, watch bridge
+crates/hakomanager-tauri  Tauri 2 shell (one hako_exec command gate)
+ui/                       React + TypeScript + Vite frontend
+```
+
+## Prerequisites
+
+- Rust toolchain with `clippy` and `rustfmt` components.
+- **Node.js >= 18** for the frontend (the host used for initial development has
+  Node 10, so `bun` was used as the Node shim: create `node -> bun` on `PATH`).
+- Linux only: `glib-2.0`, `webkit2gtk-4.1` and `libsoup-3.0` development packages
+  are required to compile the Tauri shell. The core crate has no such requirement.
+
+## Build
+
+```sh
+# Core (no desktop system libraries required)
+cargo test -p hakomanager-core
+cargo clippy -p hakomanager-core --all-targets -- -D warnings
+
+# Frontend
+cd ui && npm install && npm run typecheck && npm run build
+# With the Node->Bun shim on this host:
+# PATH=/tmp/opencode/nodebin:$PATH bunx tsc --noEmit && bunx vite build
+
+# Desktop shell (Linux requires webkit2gtk-4.1 and libsoup-3.0 development packages)
+cargo tauri dev
+```
+
+## Architecture
+
+The frontend sends JSON envelopes through a single Tauri command:
+
+```
+{ "op": "collection.list", "args": { "profileId": "..." } }
+```
+
+The core answers with:
+
+```
+{ "ok": true, "data": { ... } }
+{ "ok": false, "error": { "kind": "unique|conflict|validation|generic", "message": "..." } }
+```
+
+Because the core is UI-independent, an HTTP shell can reuse the same command surface later.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). This matches the `hakodb` engine license.
+
+## Safety
+
+- Databases open read-only by default; writes require an explicit toggle.
+- One open handle per database directory (embedded engines assume a single writer).
+- Encryption keys are never persisted by the manager.
+- Destructive operations require confirmation and can create a backup first.
+- Watch streams are bridged to Tauri events, never exposed as blocking commands.
+- Sync credentials are passed per `sync.start` call only; the manager never
+  persists room keys or auth tokens. `sync.status` uses the redacted cloud status.

@@ -148,6 +148,7 @@ pub struct QuerySpec {
 pub mod op {
     pub const WORKSPACE_LIST: &str = "workspace.list";
     pub const WORKSPACE_OPEN: &str = "workspace.open";
+    pub const WORKSPACE_INFO: &str = "workspace.info";
     pub const WORKSPACE_CLOSE: &str = "workspace.close";
     pub const WORKSPACE_SET_WRITES: &str = "workspace.setWrites";
 

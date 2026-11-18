@@ -1,4 +1,4 @@
-use super::{arg_str, arg_str_or};
+use super::{arg_str, arg_str_or, engine};
 use crate::adapter::LocalHakoAdapter;
 use crate::dto::{op, DatabaseProfile};
 use crate::error::{ManagerError, Result};
@@ -41,11 +41,12 @@ pub fn open(args: &Value, state: &mut ManagerState) -> Result<Value> {
         .unwrap_or(false);
 
     let engine = Arc::new(LocalHakoAdapter::open(path, durability, read_only)?);
+    let shared = engine.is_shared_open();
     let profile = DatabaseProfile {
         id: id.clone(),
         name,
         path: path.to_string(),
-        read_only,
+        read_only: read_only || shared,
         durability: durability.to_string(),
         encryption_configured,
     };
@@ -57,7 +58,31 @@ pub fn open(args: &Value, state: &mut ManagerState) -> Result<Value> {
         },
     );
     state.audit.record(op::WORKSPACE_OPEN, &id, true, path);
-    serde_json::to_value(profile).map_err(ManagerError::from)
+    let mut payload = serde_json::to_value(&profile).map_err(ManagerError::from)?;
+    if shared {
+        // Directory held by another instance: browse-only fallback.
+        payload["shared"] = Value::Bool(true);
+    }
+    Ok(payload)
+}
+
+pub fn info(args: &Value, state: &ManagerState) -> Result<Value> {
+    let engine = engine(args, state)?;
+    let mut payload = serde_json::to_value(&engine_profile(args, state)?).map_err(ManagerError::from)?;
+    payload["shared"] = Value::Bool(engine.shared_open());
+    Ok(payload)
+}
+
+fn engine_profile(
+    args: &Value,
+    state: &ManagerState,
+) -> Result<crate::dto::DatabaseProfile> {
+    let id = arg_str(args, "profileId")?;
+    state
+        .databases
+        .get(id)
+        .map(|entry| entry.profile.clone())
+        .ok_or_else(|| ManagerError::Validation(format!("unknown database '{id}'")))
 }
 
 pub fn close(args: &Value, state: &mut ManagerState) -> Result<Value> {

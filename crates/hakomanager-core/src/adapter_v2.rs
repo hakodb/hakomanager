@@ -12,6 +12,7 @@ use hakodb::cloud_sync::CloudSync;
 use hakodb::engine::{AccessOp, SecurityRule};
 use hakodb::index::traverse::{TraverseDir, TraverseSpec};
 use hakodb::net_sync::{DiscoveryMode, NetSyncer};
+#[cfg(unix)]
 use hakodb::socket_sync::SocketSync;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -20,6 +21,9 @@ use std::sync::Arc;
 pub(crate) struct SyncHandles {
     pub(crate) net: Option<Arc<NetSyncer>>,
     pub(crate) cloud: Option<Arc<CloudSync>>,
+    /// Unix-only in hakodb 0.21.0 (the module is `#[cfg(all(unix, feature =
+    /// "socket-sync"))]`); on Windows the plane reports a validation error.
+    #[cfg(unix)]
     pub(crate) socket: Option<Arc<SocketSync>>,
 }
 
@@ -420,6 +424,7 @@ impl AdvancedAdapter for LocalHakoAdapter {
                     .map_err(engine_error)?;
                 handles.cloud = Some(Arc::new(cloud));
             }
+            #[cfg(unix)]
             "socket" => {
                 let path = arg_str(args, "path")?;
                 let socket = SocketSync::new(self.db.clone(), Vec::new());
@@ -459,6 +464,7 @@ impl AdvancedAdapter for LocalHakoAdapter {
                     handle.stop();
                 }
             }
+            #[cfg(unix)]
             "socket" => {
                 if let Some(handle) = handles.socket.take() {
                     handle.stop();
@@ -495,10 +501,13 @@ impl AdvancedAdapter for LocalHakoAdapter {
                 })),
                 None => Ok(json!({ "status": "not-started" })),
             },
+            #[cfg(unix)]
             "socket" => match &handles.socket {
                 Some(syncer) => Ok(json!({ "peers": syncer.peer_count() })),
                 None => Ok(json!({ "status": "not-started" })),
             },
+            #[cfg(not(unix))]
+            "socket" => Ok(json!({ "status": "unsupported", "note": "socket sync is unix-only in hakodb 0.21.0" })),
             other => Err(ManagerError::Validation(format!(
                 "unknown sync plane '{other}'"
             ))),
@@ -523,10 +532,13 @@ impl AdvancedAdapter for LocalHakoAdapter {
                 }
                 None => Ok(json!([])),
             },
+            #[cfg(unix)]
             "socket" => match &handles.socket {
                 Some(syncer) => Ok(json!({ "peers": syncer.peer_count() })),
                 None => Ok(json!([])),
             },
+            #[cfg(not(unix))]
+            "socket" => Ok(json!([])),
             other => Err(ManagerError::Validation(format!(
                 "unknown sync plane '{other}'"
             ))),

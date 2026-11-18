@@ -1,10 +1,11 @@
 # Quick gate for branch protection (required check on main).
-# Answers one question fast: does it (incl. tests) still compile locked?
-# Cache makes PR runs incremental. Full matrices stay in release workflows.
-#
-# Scope: default-members only (hakomanager-core). The Tauri shell needs
-# WebKitGTK system libraries that the ubuntu runner does not carry; desktop
-# builds are tested on a dev machine (see README).
+# Four lanes, each answering one question fast:
+#   - quick-check (ubuntu): does the core compile locked, tests included?
+#   - test (ubuntu): does the core test suite pass?
+#   - shell (windows): does the Tauri shell compile (WebKitGTK-free lane),
+#     and do the tests pass on Windows (catches unix-only regressions)?
+#   - ui (ubuntu): does the React app typecheck and build?
+# Cache makes PR runs incremental. Release/packaging stays in release.yml.
 
 name: ci-quick
 
@@ -30,3 +31,61 @@ jobs:
 
       - name: check (locked, incl. tests)
         run: cargo check --tests
+
+  test:
+    name: core-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: test
+        run: cargo test -p hakomanager-core
+
+  shell:
+    name: tauri-shell-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # tauri's context macro reads frontendDist at compile time; a
+      # placeholder keeps `cargo check` independent of the ui lane.
+      - name: stub frontend dist
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ui/dist | Out-Null
+          Set-Content -Path ui/dist/index.html -Value '<!doctype html><title>stub</title>'
+
+      - name: check shell (windows)
+        run: cargo check -p hakomanager-tauri
+
+      - name: test core on windows
+        run: cargo test -p hakomanager-core
+
+  ui:
+    name: ui-build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: install
+        run: npm ci
+
+      - name: typecheck + build
+        run: npm run build

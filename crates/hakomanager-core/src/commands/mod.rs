@@ -36,6 +36,7 @@ fn handle(request: &Request, state: &mut crate::state::ManagerState) -> Result<V
     match request.op.as_str() {
         op::WORKSPACE_LIST => workspace::list(state),
         op::WORKSPACE_OPEN => workspace::open(args, state),
+        op::WORKSPACE_INFO => workspace::info(args, state),
         op::WORKSPACE_CLOSE => workspace::close(args, state),
         op::WORKSPACE_SET_WRITES => workspace::set_writes(args, state),
 

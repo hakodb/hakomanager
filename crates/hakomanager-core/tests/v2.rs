@@ -173,6 +173,15 @@ fn graph_traverse_and_inspection() {
             "op": "sync.status",
             "args": { "profileId": id, "plane": plane }
         }));
-        assert_eq!(status["status"], "not-started");
+        // socket is unix-only in hakodb 0.21.0: windows reports "unsupported".
+        let expected: Vec<&str> = if plane == "socket" {
+            vec!["not-started", "unsupported"]
+        } else {
+            vec!["not-started"]
+        };
+        assert!(
+            expected.contains(&status["status"].as_str().unwrap_or("")),
+            "plane {plane}: unexpected status {status}"
+        );
     }
 }

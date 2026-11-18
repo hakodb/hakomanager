@@ -31,6 +31,43 @@ fn open(path: &str) -> String {
 }
 
 #[test]
+fn exclusive_open_blocks_second_writer() {
+    let path = temp_path();
+    let first = open(&path);
+
+    // A second writable open under a DIFFERENT profile id (same dir) must be
+    // refused loudly by the engine's exclusive data-dir lock. (Same-id opens
+    // dedupe to the existing profile before any engine call.)
+    let raw = hakomanager_core::dispatch_json(
+        &json!({
+            "op": "workspace.open",
+            "args": { "path": path, "id": "second-writer", "name": "second", "readOnly": false }
+        })
+        .to_string(),
+    );
+    let response: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(response["ok"], false, "second writable open must fail: {raw}");
+
+    // ...and a read-only open falls back to a shared browse-only session.
+    let data = call(json!({
+        "op": "workspace.open",
+        "args": { "path": path, "id": "browser", "name": "browser", "readOnly": true }
+    }));
+    assert_eq!(data["shared"], true, "shared fallback must be flagged");
+    assert_eq!(data["read_only"], true);
+
+    let info = call(json!({
+        "op": "workspace.info",
+        "args": { "profileId": "browser" }
+    }));
+    assert_eq!(info["shared"], true);
+
+    // Cleanup the first holder so later tests are unaffected.
+    call(json!({ "op": "workspace.close", "args": { "profileId": first } }));
+    call(json!({ "op": "workspace.close", "args": { "profileId": "browser" } }));
+}
+
+#[test]
 fn document_crud_round_trip() {
     let path = temp_path();
     let id = open(&path);

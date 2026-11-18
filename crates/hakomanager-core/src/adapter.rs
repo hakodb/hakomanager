@@ -51,6 +51,9 @@ pub trait EngineAdapter: Send + Sync {
 
     fn quiescence(&self) -> Value;
     fn watch(&self, collection: Option<&str>) -> Result<()>;
+    /// Whether this open fell back to a plain read-only open because the
+    /// directory is already held by another HakoDB instance.
+    fn shared_open(&self) -> bool;
 
     fn stats(&self) -> Result<Value>;
     fn backup(&self, path: &str) -> Result<()>;
@@ -93,6 +96,9 @@ pub struct LocalHakoAdapter {
     pub(crate) path: String,
     pub(crate) sync: Mutex<SyncHandles>,
     pub(crate) runtime: tokio::runtime::Runtime,
+    /// Set when open_exclusive failed and we fell back to a plain
+    /// read-only open (directory held by another instance).
+    pub(crate) shared: AtomicBool,
 }
 
 impl LocalHakoAdapter {
@@ -101,10 +107,22 @@ impl LocalHakoAdapter {
             durability_mode: parse_durability(durability)?,
             ..HakoConfig::default()
         };
-        let db = Arc::new(Hako::open(path, config).map_err(engine_error)?);
-        db.set_read_only(read_only);
+        // Exclusive first (0.21.0 advisory data-dir lock): a second writable
+        // holder on one dir is the WAL-corruption class, so refuse it loudly.
+        // When the caller only wanted to browse (read-only), fall back to a
+        // plain open instead of failing - the other holder keeps writing.
+        let (db, effective_read_only, shared) = match Hako::open_exclusive(path, config.clone()) {
+            Ok(db) => (db, read_only, false),
+            Err(_) if read_only => {
+                let db = Hako::open(path, config).map_err(engine_error)?;
+                (db, true, true)
+            }
+            Err(error) => return Err(engine_error(error)),
+        };
+        let db = Arc::new(db);
+        db.set_read_only(effective_read_only);
         let gate = WriteGate::default();
-        gate.set(!read_only);
+        gate.set(!effective_read_only);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("hakomanager-sync")
@@ -117,7 +135,15 @@ impl LocalHakoAdapter {
             path: path.to_string(),
             sync: Mutex::new(SyncHandles::default()),
             runtime,
+            shared: AtomicBool::new(shared),
         })
+    }
+
+    /// True when the open fell back to a plain (lock-free) open because the
+    /// directory is held by another instance. Read-only browsing still works;
+    /// the UI should show this so the user knows writes are impossible.
+    pub fn is_shared_open(&self) -> bool {
+        self.shared.load(Ordering::Acquire)
     }
 
     pub fn path(&self) -> &str {
@@ -138,22 +164,29 @@ impl LocalHakoAdapter {
     }
 
     pub fn change_events(&self, collection: Option<&str>) -> Result<()> {
-        let name = collection.unwrap_or("*").to_string();
-        let receiver = self.db.watch_collection(&name);
-        std::thread::spawn(move || {
-            while let Ok(event) = receiver.recv() {
-                let path = event.path.to_string();
-                let kind = match event.kind {
-                    hakodb::engine::ChangeKind::Put => "put",
-                    hakodb::engine::ChangeKind::Delete => "delete",
-                };
-                crate::watch::publish(serde_json::json!({
-                    "collection": name,
-                    "path": path,
-                    "kind": kind,
-                }));
-            }
-        });
+        // The engine matches subscriptions literally per collection name, so
+        // a "*" wildcard never fires; subscribe per collection instead.
+        let collections: Vec<String> = match collection {
+            Some(name) => vec![name.to_string()],
+            None => self.db.list_collections().map_err(engine_error)?,
+        };
+        for name in collections {
+            let receiver = self.db.watch_collection(&name);
+            std::thread::spawn(move || {
+                while let Ok(event) = receiver.recv() {
+                    let path = event.path.to_string();
+                    let kind = match event.kind {
+                        hakodb::engine::ChangeKind::Put => "put",
+                        hakodb::engine::ChangeKind::Delete => "delete",
+                    };
+                    crate::watch::publish(serde_json::json!({
+                        "collection": name,
+                        "path": path,
+                        "kind": kind,
+                    }));
+                }
+            });
+        }
         Ok(())
     }
 }
@@ -458,6 +491,10 @@ impl EngineAdapter for LocalHakoAdapter {
 
     fn watch(&self, collection: Option<&str>) -> Result<()> {
         self.change_events(collection)
+    }
+
+    fn shared_open(&self) -> bool {
+        LocalHakoAdapter::is_shared_open(self)
     }
 
     fn vacuum(&self, collection: &str) -> Result<()> {

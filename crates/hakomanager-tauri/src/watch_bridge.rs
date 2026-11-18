@@ -16,15 +16,15 @@ use tauri::Emitter;
 /// The subscription lives on its own OS thread for the lifetime of the app.
 /// Errors are reported on stderr; they never propagate into an invoke result.
 pub fn spawn(app: tauri::AppHandle) {
-    std::thread::Builder::new()
+    let result = std::thread::Builder::new()
         .name("hako-watch-bridge".to_string())
         .spawn(move || {
-            let receiver = hakomanager_core::watch_events();
+            let receiver = hakomanager_core::watch::watch_events();
             forward_events(app, receiver);
-        })
-        .unwrap_or_else(|err| {
-            eprintln!("[hako-watch] failed to spawn watch bridge thread: {err}");
         });
+    if let Err(err) = result {
+        eprintln!("[hako-watch] failed to spawn watch bridge thread: {err}");
+    }
 }
 
 fn forward_events(app: tauri::AppHandle, receiver: crossbeam_channel::Receiver<serde_json::Value>) {

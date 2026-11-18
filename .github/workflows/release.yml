@@ -70,7 +70,8 @@ jobs:
       - name: build bundles (windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: & './ui/node_modules/.bin/tauri.cmd' build --config 'crates/hakomanager-tauri/tauri.conf.json'
+        run: |
+          & './ui/node_modules/.bin/tauri.cmd' build --config 'crates/hakomanager-tauri/tauri.conf.json'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 

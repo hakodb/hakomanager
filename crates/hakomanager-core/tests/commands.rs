@@ -182,10 +182,7 @@ fn collection_and_index_commands() {
         "op": "collection.list",
         "args": { "profileId": id }
     }));
-    assert!(collections["collections"]
-        .as_array()
-        .unwrap()
-        .contains(&json!("products")));
+    assert!(collections.as_array().unwrap().iter().any(|entry| entry["name"] == "products"));
 
     let stats = call(json!({
         "op": "collection.stats",
@@ -268,6 +265,86 @@ fn binary_value_round_trip() {
         "args": { "profileId": id, "collection": "blobs", "id": "b1" }
     }));
     assert_eq!(document["data"]["payload"]["__binary__"], "AAEC/w==");
+
+    call(json!({ "op": "workspace.close", "args": { "profileId": id } }));
+}
+
+#[test]
+fn console_fluent_query_and_ops() {
+    let path = temp_path();
+    let id = open(&path);
+
+    call(json!({
+        "op": "document.put",
+        "args": { "profileId": id, "collection": "products", "id": "p1", "data": { "name": "Kopi", "price": 12000 } }
+    }));
+    call(json!({
+        "op": "document.put",
+        "args": { "profileId": id, "collection": "products", "id": "p2", "data": { "name": "Teh", "price": 5000 } }
+    }));
+    call(json!({
+        "op": "document.put",
+        "args": { "profileId": id, "collection": "products", "id": "p3", "data": { "name": "Gula", "price": 18000 } }
+    }));
+
+    let console = |input: &str| -> Value {
+        let raw = dispatch_json(&json!({
+            "op": "query.console",
+            "args": { "profileId": id, "input": input }
+        }).to_string());
+        let response: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(response["ok"], true, "console '{input}' failed: {raw}");
+        response["data"].clone()
+    };
+
+    // Fluent: filter + orderBy + limit + select.
+    let rows = console("products.where(price,gte,6000).orderBy(price:desc).limit(2).select(name,price)");
+    let list = rows.as_array().expect("rows array");
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0]["data"]["name"], "Gula");
+    assert_eq!(list[0]["data"]["price"], 18000);
+    assert!(list[0].get("id").is_some());
+    assert_eq!(list[1]["data"]["name"], "Kopi");
+
+    // OR-group: alternatives within ONE or() call (a;b) are OR'd together,
+    // then ANDed with the where() filters (engine semantics).
+    let count = console("products.or(price,gte,6000;price,lte,5000).count()");
+    assert_eq!(count["result"].as_f64(), Some(3.0));
+
+    // Bare ops.
+    let collections = console("collections");
+    assert!(collections.as_array().unwrap().iter().any(|c| c["name"] == "products"));
+
+    let stats = console("stats products");
+    assert_eq!(stats["doc_count"], 3);
+
+    let docs = console("docs products 2");
+    assert_eq!(docs.as_array().unwrap().len(), 2);
+
+    let got = console("get products p1");
+    assert_eq!(got["data"]["name"], "Kopi");
+
+    let indexes = console("indexes products");
+    assert!(indexes.is_array() || indexes.is_object());
+
+    // Quoted value containing a dot survives the chain split.
+    let quoted = console(r#"products.where(name,eq,"Teh.Halus")"#);
+    assert!(quoted.as_array().unwrap().is_empty());
+
+    // Errors surface as validation failures.
+    let bad = dispatch_json(&json!({
+        "op": "query.console",
+        "args": { "profileId": id, "input": "products.frobnicate(1)" }
+    }).to_string());
+    let bad: Value = serde_json::from_str(&bad).unwrap();
+    assert_eq!(bad["ok"], false, "expected failure: {bad}");
+
+    let bad2 = dispatch_json(&json!({
+        "op": "query.console",
+        "args": { "profileId": id, "input": "products.where(price,gte,6000" }
+    }).to_string());
+    let bad2: Value = serde_json::from_str(&bad2).unwrap();
+    assert_eq!(bad2["ok"], false, "expected failure: {bad2}");
 
     call(json!({ "op": "workspace.close", "args": { "profileId": id } }));
 }

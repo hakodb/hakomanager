@@ -6,8 +6,15 @@ use serde_json::Value;
 
 pub fn list(args: &Value, state: &ManagerState) -> Result<Value> {
     let engine = engine(args, state)?;
-    let collections = engine.list_collections()?;
-    Ok(serde_json::json!({ "collections": collections }))
+    let names = engine.list_collections()?;
+    // Full CollectionInfo rows: the UI datagrids consume name + doc_count +
+    // byte sizes; fetching stats per collection client-side would be an
+    // N-call round trip per refresh.
+    let collections: Vec<crate::dto::CollectionInfo> = names
+        .iter()
+        .filter_map(|name| engine.collection_stats(name).ok())
+        .collect();
+    serde_json::to_value(collections).map_err(crate::error::ManagerError::from)
 }
 
 pub fn stats(args: &Value, state: &ManagerState) -> Result<Value> {

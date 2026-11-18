@@ -3,6 +3,7 @@ export type AppTab =
   | 'collections'
   | 'documents'
   | 'query'
+  | 'console'
   | 'indexes'
   | 'vector'
   | 'graph'

@@ -1,11 +1,17 @@
 [package]
 name = "hakomanager-tauri"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Tauri 2 desktop shell for HakoManager"
 
 [lib]
 crate-type = ["lib"]
+
+[features]
+# Toggles the shell between the embedded production UI (release) and the
+# vite dev server URL (`tauri dev`). Plain `cargo build --release` must pass
+# `--features custom-protocol` or the exe ships pointing at localhost:1420.
+custom-protocol = ["tauri/custom-protocol"]
 
 [[bin]]
 name = "hakomanager"

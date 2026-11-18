@@ -66,13 +66,15 @@ jobs:
           npm ci
           npm run build
 
+      # custom-protocol embeds the production UI into the exe; without it the
+      # binary is a dev-flavored build that loads the vite dev server URL.
       - name: build (windows)
         if: runner.os == 'Windows'
-        run: cargo build --release --locked -p hakomanager-tauri
+        run: cargo build --release --locked -p hakomanager-tauri --features custom-protocol
 
       - name: build (linux)
         if: runner.os == 'Linux'
-        run: cargo build --release --locked -p hakomanager-tauri
+        run: cargo build --release --locked -p hakomanager-tauri --features custom-protocol
 
       - name: stage (windows)
         if: runner.os == 'Windows'

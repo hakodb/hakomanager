@@ -35,12 +35,20 @@ pub fn open(args: &Value, state: &mut ManagerState) -> Result<Value> {
         .get("readOnly")
         .and_then(Value::as_bool)
         .unwrap_or(true);
-    let encryption_configured = args
-        .get("encryptionConfigured")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    // Encryption keys are never persisted: the caller supplies the master
+    // key per session (prompt / OS keyring) and it lives only in the open
+    // engine config.
+    let encryption_key = args
+        .get("encryptionKey")
+        .and_then(Value::as_str)
+        .map(str::to_string);
 
-    let engine = Arc::new(LocalHakoAdapter::open(path, durability, read_only)?);
+    let engine = Arc::new(LocalHakoAdapter::open(
+        path,
+        durability,
+        read_only,
+        encryption_key.as_deref(),
+    )?);
     let shared = engine.is_shared_open();
     let profile = DatabaseProfile {
         id: id.clone(),
@@ -48,7 +56,7 @@ pub fn open(args: &Value, state: &mut ManagerState) -> Result<Value> {
         path: path.to_string(),
         read_only: read_only || shared,
         durability: durability.to_string(),
-        encryption_configured,
+        encryption_configured: encryption_key.is_some(),
     };
     state.databases.insert(
         id.clone(),

@@ -12,6 +12,7 @@ import { GraphPage } from './pages/GraphPage';
 import { IndexesPage } from './pages/IndexesPage';
 import { OpsPage } from './pages/OpsPage';
 import { QueryPage } from './pages/QueryPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { SyncPage } from './pages/SyncPage';
 import { VectorPage } from './pages/VectorPage';
 import { WorkspacePage } from './pages/WorkspacePage';
@@ -35,6 +36,7 @@ const TABS: { id: AppTab; label: string }[] = [
   { id: 'ops', label: 'Ops' },
   { id: 'sync', label: 'Sync' },
   { id: 'watch', label: 'Watch' },
+  { id: 'settings', label: 'Settings' },
 ];
 
 export default function App() {
@@ -229,6 +231,7 @@ export default function App() {
                   onStatus={setStatus}
                 />
               )}
+              {activeTab === 'settings' && <SettingsPage onStatus={setStatus} />}
             </div>
           </div>
         </main>

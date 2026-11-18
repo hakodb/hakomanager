@@ -8,7 +8,8 @@ export type AppTab =
   | 'graph'
   | 'ops'
   | 'sync'
-  | 'watch';
+  | 'watch'
+  | 'settings';
 
 export interface Request {
   op: string;
@@ -36,6 +37,10 @@ export interface DatabaseProfile {
   path: string;
   read_only: boolean;
   durability: string;
+  /** Directory held by another HakoDB instance; browse-only fallback. */
+  shared?: boolean;
+  /** A session encryption key was supplied at open time (never stored). */
+  encryption_configured?: boolean;
 }
 
 export interface CollectionInfo {

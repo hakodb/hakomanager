@@ -20,9 +20,14 @@ pub fn stats(args: &Value, state: &ManagerState) -> Result<Value> {
 pub fn drop(args: &Value, state: &ManagerState) -> Result<Value> {
     let engine = engine(args, state)?;
     let name = arg_str(args, "collection")?;
+    let backup_path = crate::commands::ops::pre_op_backup(engine.as_ref(), state, "drop", name)?;
     let report = engine.drop_collection(name)?;
-    state.audit.record(op::COLLECTION_DROP, name, true, "");
-    Ok(report)
+    state
+        .audit
+        .record(op::COLLECTION_DROP, name, true, &backup_path);
+    let mut payload = serde_json::to_value(report).map_err(crate::error::ManagerError::from)?;
+    payload["backup"] = Value::String(backup_path);
+    Ok(payload)
 }
 
 pub fn rename(args: &Value, state: &ManagerState) -> Result<Value> {

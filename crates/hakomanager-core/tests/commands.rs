@@ -31,6 +31,44 @@ fn open(path: &str) -> String {
 }
 
 #[test]
+fn destructive_ops_snapshot_first() {
+    let path = temp_path();
+    let id = open(&path);
+
+    call(json!({
+        "op": "document.put",
+        "args": { "profileId": id, "collection": "logs", "id": "1", "data": { "line": "x" } }
+    }));
+
+    let result = call(json!({
+        "op": "ops.compact",
+        "args": { "profileId": id, "collection": "logs" }
+    }));
+    let backup = result["backup"].as_str().expect("compact must report its pre-backup");
+    assert!(std::path::Path::new(backup).exists(), "pre-op backup must exist: {backup}");
+    assert!(backup.contains("pre-compact"));
+
+    let raw = dispatch_drop(&id, "logs");
+    let response: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(response["ok"], true, "drop failed: {raw}");
+    let backup = response["data"]["backup"].as_str().expect("drop must report its pre-backup");
+    assert!(std::path::Path::new(backup).exists(), "pre-drop backup must exist: {backup}");
+    assert!(backup.contains("pre-drop"));
+
+    call(json!({ "op": "workspace.close", "args": { "profileId": id } }));
+}
+
+fn dispatch_drop(profile_id: &str, collection: &str) -> String {
+    hakomanager_core::dispatch_json(
+        &json!({
+            "op": "collection.drop",
+            "args": { "profileId": profile_id, "collection": collection }
+        })
+        .to_string(),
+    )
+}
+
+#[test]
 fn exclusive_open_blocks_second_writer() {
     let path = temp_path();
     let first = open(&path);

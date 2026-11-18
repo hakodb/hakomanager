@@ -19,6 +19,7 @@ export function WorkspacePage({
 }: WorkspacePageProps) {
   const [path, setPath] = useState('');
   const [readOnly, setReadOnly] = useState(false);
+  const [encryptionKey, setEncryptionKey] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -38,6 +39,9 @@ export function WorkspacePage({
       const opened = await invoke<unknown>('workspace.open', {
         path: trimmed,
         readOnly,
+        // Encryption keys are never persisted; this lives only in the open
+        // engine session.
+        ...(encryptionKey.trim() ? { encryptionKey: encryptionKey.trim() } : {}),
       });
       const updated = await refreshDatabases();
       let nextId = isDatabaseProfile(opened) ? opened.id : '';
@@ -52,6 +56,7 @@ export function WorkspacePage({
         onStatus(`Opened database at ${trimmed}. Refresh the list to select it.`);
       }
       setPath('');
+      setEncryptionKey('');
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -106,9 +111,20 @@ export function WorkspacePage({
             Open read-only
           </label>
         </div>
+        <div className="field-row">
+          <span className="field-label">Encryption key</span>
+          <input
+            className="field-input"
+            type="password"
+            value={encryptionKey}
+            placeholder="optional - only for encrypted databases"
+            onChange={(event) => setEncryptionKey(event.target.value)}
+          />
+        </div>
         {error && <div className="inline-error">{error}</div>}
         <div className="inline-note">
-          Click a database row to make it the active profile for the other pages.
+          Click a database row to make it the active profile for the other pages. The encryption
+          key is kept in memory for this session only and is never stored.
         </div>
       </section>
 
@@ -142,6 +158,8 @@ export function WorkspacePage({
                     <td>
                       {db.name}
                       {activeProfileId === db.id ? ' (active)' : ''}
+                      {db.shared ? ' [shared: another instance holds this directory]' : ''}
+                      {db.encryption_configured ? ' [encrypted]' : ''}
                     </td>
                     <td title={db.path}>{db.path}</td>
                     <td>{db.read_only ? 'Read-only' : 'Writable'}</td>

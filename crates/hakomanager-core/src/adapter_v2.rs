@@ -48,6 +48,17 @@ pub trait AdvancedAdapter: crate::adapter::EngineAdapter {
         vector: &[f32],
         k: usize,
         rrf_k: usize,
+        filters: &[hakodb::query::filter::Filter],
+    ) -> Result<Vec<VectorHit>>;
+    /// Scored KNN with admission filters (empty slice = unfiltered).
+    fn vector_search_filtered(
+        &self,
+        collection: &str,
+        field: &str,
+        vector: &[f32],
+        k: usize,
+        max_distance: Option<f64>,
+        filters: &[hakodb::query::filter::Filter],
     ) -> Result<Vec<VectorHit>>;
 
     fn graph_paths(&self, input: &TraverseSpecInput, simple: bool) -> Result<Vec<GraphHit>>;
@@ -127,6 +138,29 @@ impl AdvancedAdapter for LocalHakoAdapter {
         }
     }
 
+    fn vector_search_filtered(
+        &self,
+        collection: &str,
+        field: &str,
+        vector: &[f32],
+        k: usize,
+        max_distance: Option<f64>,
+        filters: &[hakodb::query::filter::Filter],
+    ) -> Result<Vec<VectorHit>> {
+        let rows = self
+            .db
+            .find_near_scored_filtered(collection, field, vector, k, max_distance, filters)
+            .map_err(engine_error)?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, score, doc)| VectorHit {
+                id,
+                score,
+                data: doc_to_json(&doc),
+            })
+            .collect())
+    }
+
     fn vector_info(&self, collection: &str, field: &str) -> Result<Value> {
         let indexes = self.db.list_indexes(Some(collection));
         Ok(json!({
@@ -148,10 +182,11 @@ impl AdvancedAdapter for LocalHakoAdapter {
         vector: &[f32],
         k: usize,
         rrf_k: usize,
+        filters: &[hakodb::query::filter::Filter],
     ) -> Result<Vec<VectorHit>> {
         let rows = self
             .db
-            .hybrid_search(
+            .hybrid_search_filtered(
                 collection,
                 text_field,
                 text_query,
@@ -159,6 +194,7 @@ impl AdvancedAdapter for LocalHakoAdapter {
                 vector,
                 k,
                 rrf_k,
+                filters,
             )
             .map_err(engine_error)?;
         Ok(rows

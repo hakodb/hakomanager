@@ -54,6 +54,8 @@ pub trait EngineAdapter: Send + Sync {
     /// Whether this open fell back to a plain read-only open because the
     /// directory is already held by another HakoDB instance.
     fn shared_open(&self) -> bool;
+    /// Filesystem path of the open database directory (for backups).
+    fn db_path(&self) -> String;
 
     fn stats(&self) -> Result<Value>;
     fn backup(&self, path: &str) -> Result<()>;
@@ -102,11 +104,19 @@ pub struct LocalHakoAdapter {
 }
 
 impl LocalHakoAdapter {
-    pub fn open(path: &str, durability: &str, read_only: bool) -> Result<Self> {
-        let config = HakoConfig {
+    pub fn open(
+        path: &str,
+        durability: &str,
+        read_only: bool,
+        encryption_key: Option<&str>,
+    ) -> Result<Self> {
+        let mut config = HakoConfig {
             durability_mode: parse_durability(durability)?,
             ..HakoConfig::default()
         };
+        if let Some(key) = encryption_key {
+            config.encryption_key = Some(key.to_string());
+        }
         // Exclusive first (0.21.0 advisory data-dir lock): a second writable
         // holder on one dir is the WAL-corruption class, so refuse it loudly.
         // When the caller only wanted to browse (read-only), fall back to a
@@ -495,6 +505,10 @@ impl EngineAdapter for LocalHakoAdapter {
 
     fn shared_open(&self) -> bool {
         LocalHakoAdapter::is_shared_open(self)
+    }
+
+    fn db_path(&self) -> String {
+        self.path.clone()
     }
 
     fn vacuum(&self, collection: &str) -> Result<()> {

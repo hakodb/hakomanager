@@ -33,6 +33,7 @@ export interface PersistedSession {
     name: string;
     readOnly: boolean;
     encrypted: boolean;
+    encryptedCollections?: string[];
   }>;
 }
 
@@ -124,6 +125,7 @@ export interface DatabaseProfile {
   shared?: boolean;
   /** A session encryption key was supplied at open time (never stored). */
   encryption_configured?: boolean;
+  encrypted_collections?: string[];
 }
 
 export interface CollectionInfo {

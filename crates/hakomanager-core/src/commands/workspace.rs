@@ -45,12 +45,19 @@ pub fn open(args: &Value, state: &mut ManagerState) -> Result<Value> {
         .get("encryptionKey")
         .and_then(Value::as_str)
         .map(str::to_string);
+    // Optional list of encrypted collections: "app_state, secrets".
+    let encrypted_collections: Vec<String> = match args.get("encryptedCollections") {
+        Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+        Some(Value::String(text)) => text.split(',').map(str::trim).filter(|part| !part.is_empty()).map(str::to_string).collect(),
+        _ => Vec::new(),
+    };
 
     let engine = Arc::new(LocalHakoAdapter::open(
         path,
         durability,
         read_only,
         encryption_key.as_deref(),
+        if encrypted_collections.is_empty() { None } else { Some(&encrypted_collections) },
     )?);
     let shared = engine.is_shared_open();
     let profile = DatabaseProfile {
@@ -59,6 +66,7 @@ pub fn open(args: &Value, state: &mut ManagerState) -> Result<Value> {
         path: path.to_string(),
         read_only: read_only || shared,
         durability: durability.to_string(),
+        encrypted_collections: encrypted_collections.clone(),
         encryption_configured: encryption_key.is_some(),
     };
     state.databases.insert(

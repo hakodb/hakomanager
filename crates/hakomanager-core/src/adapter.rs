@@ -109,6 +109,7 @@ impl LocalHakoAdapter {
         durability: &str,
         read_only: bool,
         encryption_key: Option<&str>,
+        encrypted_cols: Option<&[String]>,
     ) -> Result<Self> {
         let mut config = HakoConfig {
             durability_mode: parse_durability(durability)?,
@@ -116,6 +117,11 @@ impl LocalHakoAdapter {
         };
         if let Some(key) = encryption_key {
             config.encryption_key = Some(key.to_string());
+            // Explicit list wins: only named collections are decrypted.
+            // No list = engine default (all collections) for compatibility.
+            if let Some(cols) = encrypted_cols {
+                config.encrypted_cols = Some(cols.iter().cloned().collect());
+            }
         }
         // Exclusive first (0.21.0 advisory data-dir lock): a second writable
         // holder on one dir is the WAL-corruption class, so refuse it loudly.

@@ -183,6 +183,7 @@ export default function App() {
         name: db.name,
         readOnly: db.read_only,
         encrypted: Boolean(db.encryption_configured),
+        encryptedCollections: db.encrypted_collections,
       })),
     });
   }, [restored, activeTab, activeProfileId, activeCollection, databases]);
@@ -334,6 +335,7 @@ export default function App() {
           profile={activeProfile}
           collection={activeCollectionInfo}
           encrypted={Boolean(activeProfile?.encryption_configured)}
+          encryptedCollections={activeProfile?.encrypted_collections ?? []}
           onSelectProfile={selectDatabase}
           onSelectCollection={(name) => {
             selectCollection(name);

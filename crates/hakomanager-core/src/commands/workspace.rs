@@ -30,7 +30,10 @@ pub fn open(args: &Value, state: &mut ManagerState) -> Result<Value> {
     }
 
     let name = arg_str_or(args, "name", basename(path))?.to_string();
-    let durability = arg_str_or(args, "durability", "on-commit")?;
+    // Interval durability is the engine default: it does not preallocate WAL
+    // headroom, so an idle collection stays at its real data size. On-commit
+    // reserves 4 MB per collection and inflates a many-collection database.
+    let durability = arg_str_or(args, "durability", "interval")?;
     let read_only = args
         .get("readOnly")
         .and_then(Value::as_bool)

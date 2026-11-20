@@ -15,8 +15,12 @@ mod watch_bridge;
 /// string is a serialized `ResponseEnvelope`. Deserialization, dispatch and
 /// serialization all live in the core; this crate adds no business logic.
 #[tauri::command]
-fn hako_exec(request_json: String) -> Result<String, String> {
-    Ok(dispatch_json(&request_json))
+async fn hako_exec(request_json: String) -> Result<String, String> {
+    // Long operations (backup, compact, vacuum, index rebuild) must not run
+    // on the UI thread: move the whole dispatch to a blocking worker.
+    tauri::async_runtime::spawn_blocking(move || dispatch_json(&request_json))
+        .await
+        .map_err(|error| format!("task join failed: {error}"))
 }
 
 /// Build and run the HakoManager desktop application.

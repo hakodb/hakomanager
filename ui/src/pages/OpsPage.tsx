@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '../api/client';
 import { JsonEditor } from '../components/JsonEditor';
+import { ActionBar, Glyph } from '../components/ActionBar';
 import { errorMessage, type CollectionInfo } from '../types';
 
 interface OpsPageProps {
@@ -248,6 +249,13 @@ export function OpsPage({ profileId, collection, collections, onStatus }: OpsPag
 
   return (
     <div>
+      <section className="page-section">
+        <div className="two-column">
+          {Object.entries(results).map(([key, value]) => (
+            <ResultPanel key={key} title={`ops.${key}`} value={value} error={errors[key]} />
+          ))}
+        </div>
+      </section>
       <datalist id="ops-collections">
         {collections.map((item) => (
           <option key={item.name} value={item.name} />
@@ -260,26 +268,63 @@ export function OpsPage({ profileId, collection, collections, onStatus }: OpsPag
       {busy && <div className="inline-note">Working...</div>}
 
       <section className="page-section">
-        <h2 className="section-title">Target collection</h2>
-        <div className="field-row">
-          <span className="field-label">Collection</span>
-          <input
-            className="field-input field-small"
-            type="text"
-            list="ops-collections"
-            value={collectionName}
-            placeholder="Collection name"
-            onChange={(event) => setCollectionName(event.target.value)}
-          />
-          <span className="field-label">Field</span>
-          <input
-            className="field-input field-small"
-            type="text"
-            value={field}
-            placeholder="Field name"
-            onChange={(event) => setField(event.target.value)}
-          />
+        <div className="options-strip">
+          <label className="option-field"><span>Collection</span><input className="field-input field-small" list="ops-collections" value={collectionName} placeholder="defaults to all" onChange={(event) => setCollectionName(event.target.value)} /></label>
+          <label className="option-field"><span>Field</span><input className="field-input field-small" value={field} placeholder="Field name" onChange={(event) => setField(event.target.value)} /></label>
+          <label className="option-field"><span>Backup path</span><input className="field-input field-small" value={backupPath} placeholder="/path/to/backup" onChange={(event) => setBackupPath(event.target.value)} /></label>
+          <label className="option-field"><span>Restore id</span><input className="field-input field-small" value={restoreId} placeholder="Document id" onChange={(event) => setRestoreId(event.target.value)} /></label>
         </div>
+        <ActionBar
+          label="Operations"
+          items={[
+            { id: 'quiescence', label: 'Quiescence', icon: <Glyph name="clock" />, onClick: () => void run('quiescence', 'ops.quiescence', { profileId }) },
+            { id: 'stats', label: 'Stats', icon: <Glyph name="gauge" />, onClick: () => void run('stats', 'ops.stats', { profileId }) },
+            { id: 'schemaList', label: 'Schema', icon: <Glyph name="layers" />, onClick: () => void run('schemaList', 'ops.schemaList', { profileId }) },
+            { id: 'schemaSet', label: 'Set schema', icon: <Glyph name="plus" />, onClick: () => void setSchema() },
+            { id: 'schemaClear', label: 'Clear schema', icon: <Glyph name="minus" />, onClick: () => void clearSchema() },
+            { id: 'audit', label: 'Audit', icon: <Glyph name="info" />, onClick: () => void run('audit', 'ops.audit', { profileId }) },
+            { id: 'restoreAvailable', label: 'Deleted', icon: <Glyph name="search" />, onClick: () => void run('restoreAvailable', 'ops.restoreAvailable', withOptionalCollection()) },
+            { id: 'deleteQueue', label: 'Queue', icon: <Glyph name="layers" />, onClick: () => void run('deleteQueue', 'ops.deleteQueue', withOptionalCollection()) },
+            { id: 'restore', label: 'Restore', icon: <Glyph name="upload" />, onClick: () => void restore() },
+            { id: 'sweep', label: 'Sweep', icon: <Glyph name="refresh" />, onClick: () => void run('sweep', 'ops.sweep', { profileId }) },
+            { id: 'inspectIndex', label: 'Inspect index', icon: <Glyph name="info" />, onClick: () => void inspectIndex() },
+            { id: 'storageKeys', label: 'Storage keys', icon: <Glyph name="layers" />, onClick: () => void storageKeys() },
+            { id: 'snapshotIndexes', label: 'Snapshot', icon: <Glyph name="save" />, onClick: () => void run('snapshotIndexes', 'ops.snapshotIndexes', { profileId }) },
+            { id: 'versions', label: 'Versions', icon: <Glyph name="clock" />, onClick: () => void run('versions', 'ops.versions', { profileId }) },
+            { id: 'flush', label: 'Flush', icon: <Glyph name="save" />, onClick: () => void run('flush', 'ops.flush', { profileId }) },
+            { id: 'compact', label: 'Compact', icon: <Glyph name="layers" />, onClick: () => void run('compact', 'ops.compact', withOptionalCollection()) },
+            { id: 'vacuum', label: 'Vacuum', icon: <Glyph name="refresh" />, onClick: () => void vacuum() },
+            { id: 'backup', label: 'Backup', icon: <Glyph name="download" />, onClick: () => void backup() },
+            { id: 'securitySet', label: 'Apply rules', icon: <Glyph name="settings" />, onClick: () => void setSecurityRules() },
+          ].map((item) => ({ ...item, disabled: busy || !profileId }))}
+        />
+        {(errors.global || errors.schemaSet || errors.schemaClear || errors.restore || errors.inspectIndex || errors.securitySet || errors.vacuum || errors.backup) && (
+          <div className="inline-error">
+            {errors.global || errors.schemaSet || errors.schemaClear || errors.restore || errors.inspectIndex || errors.securitySet || errors.vacuum || errors.backup}
+          </div>
+        )}
+        {!profileId && <div className="inline-note">Open a database first.</div>}
+        <details className="advanced-options">
+          <summary>Advanced (schema JSON, security rules)</summary>
+          <div className="editor-pane"><JsonEditor value={schemaText} onChange={setSchemaText} /></div>
+          <div className="grid-scroll">
+            <table className="datagrid">
+              <thead><tr><th scope="col">Collection prefix</th><th scope="col">Operation</th><th scope="col">Allow</th><th scope="col">Actions</th></tr></thead>
+              <tbody>
+                {rules.map((rule, index) => (
+                  <tr key={index}>
+                    <td><input className="field-input field-small" value={rule.collectionPrefix} placeholder="docs/" onChange={(event) => updateRule(index, { collectionPrefix: event.target.value })} /></td>
+                    <td><select className="field-select" value={rule.op} onChange={(event) => updateRule(index, { op: event.target.value })}>{RULE_OPS.map((op) => <option key={op} value={op}>{op}</option>)}</select></td>
+                    <td><label className="field-checkbox"><input type="checkbox" checked={rule.allow} onChange={(event) => updateRule(index, { allow: event.target.checked })} /> Allow</label></td>
+                    <td><button type="button" className="button button-compact" onClick={() => removeRule(index)}>Remove</button></td>
+                  </tr>
+                ))}
+                {rules.length === 0 && <tr><td className="datagrid-empty" colSpan={4}>No rules</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <button type="button" className="button" onClick={() => setRules((current) => [...current, { collectionPrefix: '', op: 'get', allow: true }])}>Add rule</button>
+        </details>
       </section>
 
       <section className="page-section">

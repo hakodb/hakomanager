@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from './api/client';
-import { MenuBar } from './components/MenuBar';
+import { MenuBar, type MenuDef } from './components/MenuBar';
 import { IconRail } from './components/IconRail';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar, type StatusInfo } from './components/StatusBar';
@@ -193,6 +193,32 @@ export default function App() {
     setStatus(id ? `Active profile: ${id}` : 'No active profile');
   }, []);
 
+  // Clicking a database in the explorer list makes it the single active
+  // database: close the previous one, activate the target and reload its
+  // collections (store.get lazy-opens a closed engine from its data dir).
+  const selectDatabase = useCallback(
+    (id: string) => {
+      if (id === activeProfileId) {
+        void refreshCollections();
+        return;
+      }
+      const previous = activeProfileId;
+      void (async () => {
+        if (previous) {
+          try {
+            await invoke('workspace.close', { profileId: previous });
+          } catch (caught) {
+            setStatus(errorMessage(caught));
+          }
+        }
+        await refreshDatabases();
+        activateProfile(id);
+        setStatus(`Opened database ${id}.`);
+      })();
+    },
+    [activeProfileId, activateProfile, refreshCollections, refreshDatabases],
+  );
+
   const selectCollection = useCallback((name: string | null) => {
     setActiveCollection(name);
   }, []);
@@ -230,24 +256,24 @@ export default function App() {
     extra: [`${databases.length} db`, `${collections.length} collections`],
   };
 
-  const menus = [
+  const menus: MenuDef[] = [
     {
       id: 'file',
       label: 'File',
       items: [
-        { id: 'open', label: 'Open database…', shortcut: 'Ctrl+O', onClick: () => navigate('workspace') },
-        { id: 'refresh', label: 'Refresh', shortcut: 'F5', onClick: refreshAll },
+        { id: 'open', label: 'Open database…', icon: 'workspace', shortcut: 'Ctrl+O', onClick: () => navigate('workspace') },
+        { id: 'refresh', label: 'Refresh', icon: 'refresh', shortcut: 'F5', onClick: refreshAll },
         { id: 'sep1', label: '─', onClick: () => undefined, disabled: true },
-        { id: 'settings', label: 'Settings', onClick: () => navigate('settings') },
+        { id: 'settings', label: 'Settings', icon: 'settings', onClick: () => navigate('settings') },
       ],
     },
     {
       id: 'edit',
       label: 'Edit',
       items: [
-        { id: 'newdoc', label: 'New document', onClick: () => { setNewDocToken((value) => value + 1); navigate('documents'); } },
-        { id: 'delete', label: 'Delete selected document', onClick: () => { setDeleteToken((value) => value + 1); navigate('documents'); } },
-        { id: 'console', label: 'Open console', shortcut: 'Ctrl+L', onClick: () => navigate('console') },
+        { id: 'newdoc', label: 'New document', icon: 'plus', onClick: () => { setNewDocToken((value) => value + 1); navigate('documents'); } },
+        { id: 'delete', label: 'Delete selected document', icon: 'trash', onClick: () => { setDeleteToken((value) => value + 1); navigate('documents'); } },
+        { id: 'console', label: 'Open console', icon: 'console', shortcut: 'Ctrl+L', onClick: () => navigate('console') },
       ],
     },
     {
@@ -266,18 +292,18 @@ export default function App() {
       id: 'tools',
       label: 'Tools',
       items: [
-        { id: 'backup', label: 'Backup / maintenance', onClick: () => navigate('settings') },
-        { id: 'indexes', label: 'Manage indexes', onClick: () => navigate('indexes') },
-        { id: 'query', label: 'Query console', onClick: () => navigate('console') },
-        { id: 'sync', label: 'Sync', onClick: () => navigate('sync') },
+        { id: 'backup', label: 'Backup / maintenance', icon: 'download', onClick: () => navigate('settings') },
+        { id: 'indexes', label: 'Manage indexes', icon: 'layers', onClick: () => navigate('indexes') },
+        { id: 'query', label: 'Query console', icon: 'search', onClick: () => navigate('console') },
+        { id: 'sync', label: 'Sync', icon: 'sync', onClick: () => navigate('sync') },
       ],
     },
     {
       id: 'help',
       label: 'Help',
       items: [
-        { id: 'about', label: 'HakoManager — local-first database manager', onClick: () => setStatus('HakoManager — built on HakoDB') },
-        { id: 'docs', label: 'HakoDB documentation', onClick: () => setStatus('Docs: https://hakodb.github.io/docs/') },
+        { id: 'about', label: 'HakoManager — local-first database manager', icon: 'info', onClick: () => setStatus('HakoManager — built on HakoDB') },
+        { id: 'docs', label: 'HakoDB documentation', icon: 'export', onClick: () => setStatus('Docs: https://hakodb.github.io/docs/') },
       ],
     },
   ];
@@ -290,7 +316,6 @@ export default function App() {
         <IconRail
           activeTab={activeTab}
           onNavigate={navigate}
-          onOpen={() => navigate('workspace')}
           onRefresh={refreshAll}
           onNewDocument={() => {
             setNewDocToken((value) => value + 1);
@@ -308,7 +333,8 @@ export default function App() {
           activeCollection={activeCollection}
           profile={activeProfile}
           collection={activeCollectionInfo}
-          onSelectProfile={activateProfile}
+          encrypted={Boolean(activeProfile?.encryption_configured)}
+          onSelectProfile={selectDatabase}
           onSelectCollection={(name) => {
             selectCollection(name);
             navigate('documents');

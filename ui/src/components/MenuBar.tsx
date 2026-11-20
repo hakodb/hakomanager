@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
+import { Glyph, type GlyphName } from './ActionBar';
 
 interface MenuItem {
   id: string;
   label: string;
+  icon?: GlyphName;
   shortcut?: string;
   disabled?: boolean;
   checked?: boolean;
   onClick: () => void;
 }
 
-interface MenuDef {
+export interface MenuDef {
   id: string;
   label: string;
   items: MenuItem[];
@@ -59,6 +61,7 @@ export function MenuBar({ menus }: MenuBarProps) {
                   }}
                 >
                   <span className="menu-item-check">{item.checked ? '✓' : ''}</span>
+                  {item.icon && <span className="menu-item-icon"><Glyph name={item.icon} /></span>}
                   <span className="menu-item-label">{item.label}</span>
                   {item.shortcut && <span className="menu-item-shortcut">{item.shortcut}</span>}
                 </button>

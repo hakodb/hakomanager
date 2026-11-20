@@ -9,6 +9,7 @@ interface SidebarProps {
   activeCollection?: string | null;
   profile?: DatabaseProfile | null;
   collection?: CollectionInfo | null;
+  encrypted?: boolean;
   onSelectProfile?: (id: string) => void;
   onSelectCollection?: (name: string) => void;
 }
@@ -20,6 +21,7 @@ export function Sidebar({
   activeCollection = null,
   profile = null,
   collection = null,
+  encrypted = false,
   onSelectProfile,
   onSelectCollection,
 }: SidebarProps) {
@@ -66,6 +68,9 @@ export function Sidebar({
                 >
                   {db.name}
                   {db.read_only ? ' [read-only]' : ''}
+                  {encrypted && activeProfileId === db.id && (
+                    <span className="tree-key" title="This database was opened with an encryption key">🔑</span>
+                  )}
                 </div>
                 {activeProfileId === db.id &&
                   collections.map((item) => (

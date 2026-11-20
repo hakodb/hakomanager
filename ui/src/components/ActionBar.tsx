@@ -98,13 +98,19 @@ export function Glyph({ name }: { name: GlyphName }) {
       return <svg {...common}><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v6H4V6h6" /></svg>;
     case 'settings':
       return <svg {...common}><path d="M4 7h16M4 12h16M4 17h16" /><circle cx="9" cy="7" r="2" fill="currentColor" /><circle cx="15" cy="12" r="2" fill="currentColor" /><circle cx="8" cy="17" r="2" fill="currentColor" /></svg>;
+    case 'workspace':
+      return <svg {...common}><path d="M3 7h6l2 2h10v10H3z" /><path d="M3 7V5h6l2 2" /></svg>;
+    case 'console':
+      return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="1" /><path d="m7 9 3 3-3 3M13 15h4" /></svg>;
+    case 'sync':
+      return <svg {...common}><path d="M20 11a8 8 0 0 0-14-4L4 9" /><path d="M4 5v4h4" /><path d="M4 13a8 8 0 0 0 14 4l2-2" /><path d="M20 19v-4h-4" /></svg>;
   }
 }
 
 export type GlyphName =
   | 'refresh' | 'plus' | 'minus' | 'play' | 'trash' | 'search' | 'download'
   | 'upload' | 'save' | 'graph' | 'vector' | 'layers' | 'gauge' | 'clock'
-  | 'info' | 'stop' | 'export' | 'settings';
+  | 'info' | 'stop' | 'export' | 'settings' | 'workspace' | 'console' | 'sync';
 
 /** Segmented option selector for mutually exclusive modes/actions. */
 interface SegmentedProps<T extends string | number> {

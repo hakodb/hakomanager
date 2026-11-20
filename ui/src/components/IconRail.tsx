@@ -3,15 +3,12 @@ import type { AppTab } from '../types';
 interface IconRailProps {
   activeTab: AppTab;
   onNavigate: (tab: AppTab) => void;
-  onOpen: () => void;
   onRefresh: () => void;
   onNewDocument: () => void;
   onDelete: () => void;
 }
 
-type IconName =
-  | AppTab
-  | 'open' | 'refresh' | 'newdoc' | 'delete';
+type IconName = AppTab | 'refresh' | 'newdoc' | 'delete';
 
 const NAV: Array<{ id: AppTab; icon: IconName; label: string }> = [
   { id: 'workspace', icon: 'workspace', label: 'Workspace' },
@@ -42,7 +39,6 @@ function Icon({ name }: { name: IconName }) {
   };
   switch (name) {
     case 'workspace':
-    case 'open':
       return <svg {...common}><path d="M3 7h6l2 2h10v10H3z" /><path d="M3 7V5h6l2 2" /></svg>;
     case 'collections':
       return <svg {...common}><path d="M12 3 3 8l9 5 9-5-9-5z" /><path d="m3 13 9 5 9-5" /></svg>;
@@ -73,7 +69,7 @@ function Icon({ name }: { name: IconName }) {
   }
 }
 
-export function IconRail({ activeTab, onNavigate, onOpen, onRefresh, onNewDocument, onDelete }: IconRailProps) {
+export function IconRail({ activeTab, onNavigate, onRefresh, onNewDocument, onDelete }: IconRailProps) {
   return (
     <nav className="icon-rail" aria-label="Navigation">
       <div className="icon-rail-group">
@@ -93,7 +89,6 @@ export function IconRail({ activeTab, onNavigate, onOpen, onRefresh, onNewDocume
       </div>
       <div className="icon-rail-divider" />
       <div className="icon-rail-group">
-        <button type="button" className="rail-button" title="Open database" aria-label="Open database" onClick={onOpen}><Icon name="open" /></button>
         <button type="button" className="rail-button" title="Refresh" aria-label="Refresh" onClick={onRefresh}><Icon name="refresh" /></button>
         <button type="button" className="rail-button" title="New document" aria-label="New document" onClick={onNewDocument}><Icon name="newdoc" /></button>
         <button type="button" className="rail-button rail-danger" title="Delete selected document" aria-label="Delete selected document" onClick={onDelete}><Icon name="delete" /></button>

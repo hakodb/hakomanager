@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '../api/client';
+import { Glyph } from '../components/ActionBar';
 import { errorMessage, isDatabaseProfile, type DatabaseProfile } from '../types';
 
 interface WorkspacePageProps {
@@ -26,6 +28,21 @@ export function WorkspacePage({
   useEffect(() => {
     void refreshDatabases();
   }, [refreshDatabases]);
+
+  async function browsePath() {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: 'Select a HakoDB database directory',
+      });
+      if (typeof selected === 'string' && selected) {
+        setPath(selected);
+      }
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
 
   async function handleOpen() {
     const trimmed = path.trim();
@@ -103,6 +120,9 @@ export function WorkspacePage({
             placeholder="/path/to/local/database"
             onChange={(event) => setPath(event.target.value)}
           />
+          <button type="button" className="button" title="Browse for a directory" aria-label="Browse" onClick={() => void browsePath()}>
+            <Glyph name="layers" /> Browse
+          </button>
           <button type="button" className="button button-primary" disabled={busy} onClick={() => void handleOpen()}>
             Open
           </button>

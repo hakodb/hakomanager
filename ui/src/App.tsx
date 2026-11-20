@@ -4,7 +4,6 @@ import { MenuBar, type MenuDef } from './components/MenuBar';
 import { IconRail } from './components/IconRail';
 import { Sidebar } from './components/Sidebar';
 import { StatusBar, type StatusInfo } from './components/StatusBar';
-import { TitleBar } from './components/TitleBar';
 import { UpdateBootstrap } from './updater';
 import { WatchFeed } from './components/WatchFeed';
 import { CollectionsPage } from './pages/CollectionsPage';
@@ -311,7 +310,6 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <TitleBar />
       <MenuBar menus={menus} />
       <div className="workbench">
         <IconRail

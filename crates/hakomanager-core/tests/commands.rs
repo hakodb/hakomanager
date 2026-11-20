@@ -348,3 +348,42 @@ fn console_fluent_query_and_ops() {
 
     call(json!({ "op": "workspace.close", "args": { "profileId": id } }));
 }
+#[test]
+fn query_select_returns_only_projected_fields() {
+    let path = temp_path();
+    let id = open(&path);
+    for (doc_id, name) in [("u1", "alice"), ("u2", "bob")] {
+        call(json!({
+            "op": "document.put",
+            "args": {
+                "profileId": id,
+                "collection": "users",
+                "id": doc_id,
+                "data": { "name": name, "age": 30, "secret": "hidden" }
+            }
+        }));
+    }
+
+    let result = call(json!({
+        "op": "query.run",
+        "args": {
+            "profileId": id,
+            "spec": {
+                "collection": "users",
+                "filters": [],
+                "order_by": [],
+                "select": ["name"],
+                "limit": 10
+            }
+        }
+    }));
+    let rows = result.as_array().expect("query rows");
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        let data = row["data"].as_object().unwrap();
+        let name = data.get("name").and_then(Value::as_str).unwrap();
+        assert!(name == "alice" || name == "bob", "unexpected name: {name}");
+        assert!(!data.contains_key("age"), "select must drop non-selected fields: {row}");
+        assert!(!data.contains_key("secret"), "select must drop non-selected fields: {row}");
+    }
+}

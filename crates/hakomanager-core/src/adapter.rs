@@ -297,6 +297,29 @@ impl EngineAdapter for LocalHakoAdapter {
 
     fn run_query(&self, spec: &QuerySpec) -> Result<Vec<DocumentView>> {
         let query = build_query(spec)?;
+        // db.query() ignores `projection`: the decoded-document path returns
+        // full docs. Use the projected API when select() was requested so the
+        // UI's column choice is actually honoured (same path as hakocli).
+        if !spec.select.is_empty() {
+            let rows = self
+                .db
+                .query_projected_zero_copy(query, &spec.select)
+                .map_err(engine_error)?;
+            return Ok(rows
+                .into_iter()
+                .map(|(id, fields)| {
+                    let mut doc = HakoDoc::default();
+                    for (field, value) in fields {
+                        doc.insert(field, value);
+                    }
+                    DocumentView {
+                        collection: spec.collection.clone(),
+                        id,
+                        data: doc_to_json(&doc),
+                    }
+                })
+                .collect());
+        }
         let rows = self.db.query(query).map_err(engine_error)?;
         Ok(rows
             .into_iter()

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '../api/client';
+import { ActionBar, Glyph, Segmented } from '../components/ActionBar';
 import { DataGrid, type DataGridColumn } from '../components/DataGrid';
 import { JsonEditor } from '../components/JsonEditor';
 import { errorMessage, type CollectionInfo } from '../types';
@@ -11,17 +12,12 @@ interface GraphPageProps {
   onStatus: (message: string) => void;
 }
 
-interface Seed {
-  collection: string;
-  id: string;
-}
-
 const ANALYSIS_OPS = [
-  { key: 'components', op: 'graph.components' },
-  { key: 'communities', op: 'graph.communities' },
-  { key: 'cycle', op: 'graph.cycle' },
-  { key: 'topo', op: 'graph.topo' },
-  { key: 'degree', op: 'graph.degree' },
+  { key: 'components', op: 'graph.components', label: 'Components' },
+  { key: 'communities', op: 'graph.communities', label: 'Communities' },
+  { key: 'cycle', op: 'graph.cycle', label: 'Cycle' },
+  { key: 'topo', op: 'graph.topo', label: 'Topo' },
+  { key: 'degree', op: 'graph.degree', label: 'Degree' },
 ];
 
 const hitColumns: DataGridColumn[] = [
@@ -77,36 +73,17 @@ function normalizeHits(raw: unknown): Record<string, unknown>[] {
   });
 }
 
-function parseSeeds(text: string, defaultCollection: string): Seed[] {
+function parseSeeds(text: string, defaultCollection: string): Array<{ collection: string; id: string }> {
   return text
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => line !== '')
+    .filter(Boolean)
     .map((line) => {
       const slash = line.indexOf('/');
-      if (slash > 0) {
-        return { collection: line.slice(0, slash).trim(), id: line.slice(slash + 1).trim() };
-      }
-      return { collection: defaultCollection, id: line };
+      return slash > 0
+        ? { collection: line.slice(0, slash).trim(), id: line.slice(slash + 1).trim() }
+        : { collection: defaultCollection, id: line };
     });
-}
-
-interface JsonResultPanelProps {
-  title: string;
-  value: unknown;
-}
-
-function JsonResultPanel({ title, value }: JsonResultPanelProps) {
-  return (
-    <div className="panel">
-      <div className="panel-header">{title}</div>
-      <div className="panel-body">
-        <div className="json-view">
-          <JsonEditor value={pretty(value)} onChange={() => undefined} readOnly />
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export function GraphPage({ profileId, collection, collections, onStatus }: GraphPageProps) {
@@ -122,6 +99,7 @@ export function GraphPage({ profileId, collection, collections, onStatus }: Grap
   const [seedsText, setSeedsText] = useState('');
   const [damping, setDamping] = useState(0.85);
   const [top, setTop] = useState(20);
+  const [mode, setMode] = useState<'paths' | 'analysis'>('paths');
   const [pathRows, setPathRows] = useState<Record<string, unknown>[]>([]);
   const [pathLabel, setPathLabel] = useState('Paths');
   const [jsonResults, setJsonResults] = useState<Record<string, unknown>>({});
@@ -130,14 +108,12 @@ export function GraphPage({ profileId, collection, collections, onStatus }: Grap
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (collection) {
-      setCollectionName(collection);
-    }
+    if (collection) setCollectionName(collection);
   }, [collection]);
 
   function requireProfile(): boolean {
     if (!profileId) {
-      setError('Open a database on the Workspace tab first.');
+      setError('Open a database first.');
       return false;
     }
     return true;
@@ -151,31 +127,20 @@ export function GraphPage({ profileId, collection, collections, onStatus }: Grap
       max_depth: maxDepth,
       limit,
     };
-    const edge = edgeField.trim();
-    const via = viaEdge.trim();
-    const weight = weightField.trim();
-    if (edge) {
-      spec.edge_field = edge;
-    }
-    if (via) {
-      spec.via_edge = via;
-    }
-    if (weight) {
-      spec.weight_field = weight;
-    }
+    if (edgeField.trim()) spec.edge_field = edgeField.trim();
+    if (viaEdge.trim()) spec.via_edge = viaEdge.trim();
+    if (weightField.trim()) spec.weight_field = weightField.trim();
     return spec;
   }
 
   async function runPaths(op: 'graph.paths' | 'graph.simplePaths') {
-    if (!requireProfile()) {
-      return;
-    }
+    if (!requireProfile()) return;
     setError('');
     setBusy(true);
     try {
       const result = await invoke<unknown>(op, { profileId, spec: buildSpec() });
       setPathRows(normalizeHits(result));
-      setPathLabel(op === 'graph.paths' ? 'Paths (graph.paths)' : 'Simple paths (graph.simplePaths)');
+      setPathLabel(op === 'graph.paths' ? 'Paths' : 'Simple paths');
       onStatus(`${op} completed.`);
     } catch (caught) {
       setError(`${op}: ${errorMessage(caught)}`);
@@ -185,9 +150,7 @@ export function GraphPage({ profileId, collection, collections, onStatus }: Grap
   }
 
   async function runAnalysis(key: string, op: string, args: Record<string, unknown>) {
-    if (!requireProfile()) {
-      return;
-    }
+    if (!requireProfile()) return;
     setError('');
     setBusy(true);
     try {
@@ -201,41 +164,15 @@ export function GraphPage({ profileId, collection, collections, onStatus }: Grap
     }
   }
 
-  async function runPagerank() {
-    await runAnalysis('pagerank', 'graph.pagerank', {
-      profileId,
-      collection: collectionName.trim(),
-      seeds: parseSeeds(seedsText, collectionName.trim()),
-      spec: buildSpec(),
-      damping,
-      top,
-    });
-  }
-
-  async function runSubgraph() {
-    const args: Record<string, unknown> = { profileId, spec: buildSpec() };
-    const fields = fieldsText
-      .split(',')
-      .map((field) => field.trim())
-      .filter((field) => field !== '');
-    if (fields.length > 0) {
-      args.fields = fields;
-    }
-    await runAnalysis('subgraph', 'graph.subgraph', args);
-  }
-
   async function runExport() {
-    if (!requireProfile()) {
-      return;
-    }
+    if (!requireProfile()) return;
     setError('');
     setBusy(true);
     try {
-      const result = await invoke<unknown>('graph.export', { profileId, spec: buildSpec() });
-      setExportText(pretty(result));
-      onStatus('Graph export completed.');
+      setExportText(pretty(await invoke<unknown>('graph.export', { profileId, spec: buildSpec() })));
+      onStatus('graph.export completed.');
     } catch (caught) {
-      setError(`graph.export: ${errorMessage(caught)}`);
+      setError(errorMessage(caught));
     } finally {
       setBusy(false);
     }
@@ -244,200 +181,105 @@ export function GraphPage({ profileId, collection, collections, onStatus }: Grap
   return (
     <div>
       {error && <div className="inline-error">{error}</div>}
-      {!profileId && (
-        <div className="inline-note">Open a database on the Workspace tab to explore graphs.</div>
-      )}
+      {!profileId && <div className="inline-note">Open a database first.</div>}
 
       <section className="page-section">
-        <h2 className="section-title">Traversal specification</h2>
-        <div className="field-row">
-          <span className="field-label">Collection</span>
-          <select
-            className="field-select"
-            value={collectionName}
-            onChange={(event) => setCollectionName(event.target.value)}
-          >
-            <option value="">Select collection</option>
-            {collections.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <span className="field-label">Start id</span>
-          <input
-            className="field-input field-small"
-            type="text"
-            value={startId}
-            placeholder="Document id"
-            onChange={(event) => setStartId(event.target.value)}
-          />
-          <span className="field-label">Direction</span>
-          <select
-            className="field-select"
-            value={direction}
-            onChange={(event) => setDirection(Number(event.target.value))}
-          >
-            <option value={0}>0 - out</option>
-            <option value={1}>1 - in</option>
-            <option value={2}>2 - both</option>
-          </select>
+        <Segmented
+          label="Mode"
+          value={mode}
+          options={[
+            { value: 'paths', label: 'Paths', icon: 'graph' },
+            { value: 'analysis', label: 'Analysis', icon: 'gauge' },
+          ]}
+          onChange={setMode}
+        />
+        <ActionBar
+          label="Graph actions"
+          items={[
+            { id: 'paths', label: 'Paths', icon: <Glyph name="graph" />, active: mode === 'paths', onClick: () => { setMode('paths'); void runPaths('graph.paths'); }, disabled: busy || !profileId },
+            { id: 'simple', label: 'Simple paths', icon: <Glyph name="search" />, onClick: () => void runPaths('graph.simplePaths'), disabled: busy || !profileId },
+            { id: 'rank', label: 'PageRank', icon: <Glyph name="gauge" />, onClick: () => void runAnalysis('rank', 'graph.pagerank', { profileId, collection: collectionName.trim(), seeds: parseSeeds(seedsText, collectionName.trim()), spec: buildSpec(), damping, top }), disabled: busy || !profileId },
+            { id: 'subgraph', label: 'Subgraph', icon: <Glyph name="layers" />, onClick: () => void runAnalysis('subgraph', 'graph.subgraph', { profileId, spec: { ...buildSpec(), projection: fieldsText.split(',').map((f) => f.trim()).filter(Boolean) } }), disabled: busy || !profileId },
+            { id: 'export', label: 'Export', icon: <Glyph name="export" />, onClick: () => void runExport(), disabled: busy || !profileId },
+          ]}
+        />
+        <div className="options-strip">
+          <label className="option-field">
+            <span>Collection</span>
+            <select className="field-select" value={collectionName} onChange={(event) => setCollectionName(event.target.value)}>
+              <option value="">Select</option>
+              {collections.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+            </select>
+          </label>
+          <label className="option-field">
+            <span>Start id</span>
+            <input className="field-input field-small" value={startId} placeholder="Document id" onChange={(event) => setStartId(event.target.value)} />
+          </label>
+          <label className="option-field">
+            <span>Direction</span>
+            <Segmented value={direction} options={[{ value: 0, label: 'Out' }, { value: 1, label: 'In' }, { value: 2, label: 'Both' }]} onChange={setDirection} />
+          </label>
+          <label className="option-field">
+            <span>Max depth</span>
+            <input className="field-input field-number" type="number" min={1} value={maxDepth} onChange={(event) => setMaxDepth(Number(event.target.value))} />
+          </label>
+          <label className="option-field">
+            <span>Limit</span>
+            <input className="field-input field-number" type="number" min={1} value={limit} onChange={(event) => setLimit(Number(event.target.value))} />
+          </label>
         </div>
-        <div className="field-row">
-          <span className="field-label">Edge field</span>
-          <input
-            className="field-input field-small"
-            type="text"
-            value={edgeField}
-            placeholder="edges"
-            onChange={(event) => setEdgeField(event.target.value)}
-          />
-          <span className="field-label">Via edge</span>
-          <input
-            className="field-input field-small"
-            type="text"
-            value={viaEdge}
-            placeholder="edge label"
-            onChange={(event) => setViaEdge(event.target.value)}
-          />
-          <span className="field-label">Weight field</span>
-          <input
-            className="field-input field-small"
-            type="text"
-            value={weightField}
-            placeholder="weight"
-            onChange={(event) => setWeightField(event.target.value)}
-          />
-        </div>
-        <div className="field-row">
-          <span className="field-label">Max depth</span>
-          <input
-            className="field-input field-number"
-            type="number"
-            min={0}
-            value={maxDepth}
-            onChange={(event) => setMaxDepth(Number(event.target.value))}
-          />
-          <span className="field-label">Limit</span>
-          <input
-            className="field-input field-number"
-            type="number"
-            min={1}
-            value={limit}
-            onChange={(event) => setLimit(Number(event.target.value))}
-          />
-          <span className="field-label">Fields (subgraph)</span>
-          <input
-            className="field-input field-small"
-            type="text"
-            value={fieldsText}
-            placeholder="a, b, c"
-            onChange={(event) => setFieldsText(event.target.value)}
-          />
-        </div>
+        <details className="advanced-options">
+          <summary>Advanced options (edge field, via, weight, projection, seeds)</summary>
+          <div className="options-strip">
+            <label className="option-field"><span>Edge field</span><input className="field-input field-small" value={edgeField} placeholder="edges" onChange={(event) => setEdgeField(event.target.value)} /></label>
+            <label className="option-field"><span>Via edge</span><input className="field-input field-small" value={viaEdge} placeholder="edge label" onChange={(event) => setViaEdge(event.target.value)} /></label>
+            <label className="option-field"><span>Weight field</span><input className="field-input field-small" value={weightField} placeholder="weight" onChange={(event) => setWeightField(event.target.value)} /></label>
+            <label className="option-field"><span>Fields</span><input className="field-input field-small" value={fieldsText} placeholder="a, b, c" onChange={(event) => setFieldsText(event.target.value)} /></label>
+            <label className="option-field"><span>Seeds</span><input className="field-input field-small" value={seedsText} placeholder="collection/id" onChange={(event) => setSeedsText(event.target.value)} /></label>
+            <label className="option-field"><span>Damping</span><input className="field-input field-number" type="number" min={0} max={1} step={0.01} value={damping} onChange={(event) => setDamping(Number(event.target.value))} /></label>
+            <label className="option-field"><span>Top</span><input className="field-input field-number" type="number" min={1} value={top} onChange={(event) => setTop(Number(event.target.value))} /></label>
+          </div>
+        </details>
       </section>
 
-      <section className="page-section">
-        <h2 className="section-title">Path finding</h2>
-        <div className="field-row">
-          <button type="button" className="button button-primary" disabled={busy} onClick={() => void runPaths('graph.paths')}>
-            Paths
-          </button>
-          <button type="button" className="button" disabled={busy} onClick={() => void runPaths('graph.simplePaths')}>
-            Simple paths
-          </button>
-        </div>
-        <div className="panel">
-          <div className="panel-header">{pathLabel}</div>
-          <div className="panel-body">
-            <div className="grid-scroll">
-              <DataGrid columns={hitColumns} rows={pathRows} />
+      {mode === 'paths' && (
+        <section className="page-section">
+          <div className="panel">
+            <div className="panel-header">{pathLabel}</div>
+            <div className="panel-body">
+              <div className="grid-scroll">
+                <DataGrid columns={hitColumns} rows={pathRows} />
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      <section className="page-section">
-        <h2 className="section-title">Graph analysis</h2>
-        <div className="field-row">
-          {ANALYSIS_OPS.map((entry) => (
-            <button
-              key={entry.key}
-              type="button"
-              className="button"
-              disabled={busy}
-              onClick={() =>
-                void runAnalysis(entry.key, entry.op, {
-                  profileId,
-                  collection: collectionName.trim(),
-                  spec: buildSpec(),
-                })
-              }
-            >
-              {entry.op}
-            </button>
-          ))}
-        </div>
-        <div className="field-row">
-          <span className="field-label">Seeds</span>
-          <textarea
-            className="seeds-input"
-            value={seedsText}
-            placeholder={'collection/id\ndocs/doc-1'}
-            onChange={(event) => setSeedsText(event.target.value)}
-          />
-          <span className="field-label">Damping</span>
-          <input
-            className="field-input field-number"
-            type="number"
-            min={0}
-            max={1}
-            step={0.01}
-            value={damping}
-            onChange={(event) => setDamping(Number(event.target.value))}
-          />
-          <span className="field-label">Top</span>
-          <input
-            className="field-input field-number"
-            type="number"
-            min={1}
-            value={top}
-            onChange={(event) => setTop(Number(event.target.value))}
-          />
-          <button type="button" className="button" disabled={busy} onClick={() => void runPagerank()}>
-            graph.pagerank
-          </button>
-        </div>
-        <div className="field-row">
-          <button type="button" className="button" disabled={busy} onClick={() => void runSubgraph()}>
-            graph.subgraph
-          </button>
-          <button type="button" className="button" disabled={busy} onClick={() => void runExport()}>
-            graph.export
-          </button>
-        </div>
-        <div className="two-column">
-          {ANALYSIS_OPS.filter((entry) => entry.key in jsonResults).map((entry) => (
-            <JsonResultPanel key={entry.key} title={entry.op} value={jsonResults[entry.key]} />
-          ))}
-          {'pagerank' in jsonResults && (
-            <JsonResultPanel title="graph.pagerank" value={jsonResults.pagerank} />
-          )}
-          {'subgraph' in jsonResults && (
-            <JsonResultPanel title="graph.subgraph" value={jsonResults.subgraph} />
-          )}
-        </div>
-      </section>
+      {mode === 'analysis' && (
+        <section className="page-section">
+          <div className="action-bar" role="toolbar" aria-label="Analytics">
+            {ANALYSIS_OPS.map((entry) => (
+              <button key={entry.key} type="button" className="action-button" disabled={busy || !profileId} onClick={() => void runAnalysis(entry.key, entry.op, { profileId, collection: collectionName.trim(), spec: buildSpec() })}>
+                {entry.label}
+              </button>
+            ))}
+          </div>
+          <div className="two-column">
+            {Object.entries(jsonResults).map(([key, value]) => (
+              <div className="panel" key={key}>
+                <div className="panel-header">graph.{key}</div>
+                <div className="panel-body"><div className="json-view"><JsonEditor value={pretty(value)} onChange={() => undefined} readOnly /></div></div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {exportText !== '' && (
         <section className="page-section">
           <div className="panel">
             <div className="panel-header">graph.export</div>
-            <div className="panel-body">
-              <div className="json-view">
-                <JsonEditor value={exportText} onChange={() => undefined} readOnly />
-              </div>
-            </div>
+            <div className="panel-body"><div className="json-view"><JsonEditor value={exportText} onChange={() => undefined} readOnly /></div></div>
           </div>
         </section>
       )}

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from './api/client';
+import { MenuBar } from './components/MenuBar';
 import { IconRail } from './components/IconRail';
 import { Sidebar } from './components/Sidebar';
-import { StatusBar } from './components/StatusBar';
+import { StatusBar, type StatusInfo } from './components/StatusBar';
 import { TitleBar } from './components/TitleBar';
 import { UpdateBootstrap } from './updater';
 import { WatchFeed } from './components/WatchFeed';
@@ -46,6 +47,28 @@ export default function App() {
   const [deleteToken, setDeleteToken] = useState(0);
   const [restored, setRestored] = useState(false);
   const restoreStarted = useRef(false);
+  const [syncInfo, setSyncInfo] = useState<{ active: boolean; mode?: string; status?: string; peers?: number } | undefined>();
+
+  const pollSync = useCallback(async () => {
+    if (!activeProfileId) {
+      setSyncInfo(undefined);
+      return;
+    }
+    try {
+      const raw = await invoke<unknown>('sync.status', { profileId: activeProfileId });
+      if (typeof raw === 'object' && raw !== null) {
+        const value = raw as Record<string, unknown>;
+        setSyncInfo({
+          active: Boolean(value.active),
+          mode: typeof value.mode === 'string' ? value.mode : undefined,
+          status: typeof value.status === 'string' ? value.status : undefined,
+          peers: typeof value.peers === 'number' ? value.peers : undefined,
+        });
+      }
+    } catch {
+      setSyncInfo(undefined);
+    }
+  }, [activeProfileId]);
 
   const refreshDatabases = useCallback(async (): Promise<DatabaseProfile[]> => {
     try {
@@ -78,6 +101,32 @@ export default function App() {
   useEffect(() => {
     void refreshDatabases();
   }, [refreshDatabases]);
+
+  useEffect(() => {
+    void pollSync();
+    const timer = window.setInterval(() => void pollSync(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [pollSync]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {
+        event.preventDefault();
+        navigate('workspace');
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'l') {
+        event.preventDefault();
+        navigate('console');
+      }
+      if (event.key === 'F5') {
+        event.preventDefault();
+        refreshAll();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     void refreshCollections();
@@ -173,13 +222,70 @@ export default function App() {
     () => collections.find((item) => item.name === activeCollection) ?? null,
     [collections, activeCollection],
   );
-  const context = activeProfile
-    ? `${activeProfile.name}${activeCollection ? ` / ${activeCollection}` : ''}`
-    : 'No database open';
+  const statusInfo: StatusInfo = {
+    database: activeProfile?.name ?? 'No database',
+    collection: activeCollection,
+    mode: activeProfile ? (activeProfile.read_only ? 'Read-only' : 'Writable') : undefined,
+    sync: syncInfo,
+    extra: [`${databases.length} db`, `${collections.length} collections`],
+  };
+
+  const menus = [
+    {
+      id: 'file',
+      label: 'File',
+      items: [
+        { id: 'open', label: 'Open database…', shortcut: 'Ctrl+O', onClick: () => navigate('workspace') },
+        { id: 'refresh', label: 'Refresh', shortcut: 'F5', onClick: refreshAll },
+        { id: 'sep1', label: '─', onClick: () => undefined, disabled: true },
+        { id: 'settings', label: 'Settings', onClick: () => navigate('settings') },
+      ],
+    },
+    {
+      id: 'edit',
+      label: 'Edit',
+      items: [
+        { id: 'newdoc', label: 'New document', onClick: () => { setNewDocToken((value) => value + 1); navigate('documents'); } },
+        { id: 'delete', label: 'Delete selected document', onClick: () => { setDeleteToken((value) => value + 1); navigate('documents'); } },
+        { id: 'console', label: 'Open console', shortcut: 'Ctrl+L', onClick: () => navigate('console') },
+      ],
+    },
+    {
+      id: 'view',
+      label: 'View',
+      items: [
+        ...(['workspace', 'collections', 'documents', 'query', 'console', 'indexes', 'vector', 'graph', 'ops', 'sync', 'watch', 'settings'] as AppTab[]).map((tab) => ({
+          id: tab,
+          label: tab.charAt(0).toUpperCase() + tab.slice(1),
+          checked: activeTab === tab,
+          onClick: () => navigate(tab),
+        })),
+      ],
+    },
+    {
+      id: 'tools',
+      label: 'Tools',
+      items: [
+        { id: 'backup', label: 'Backup / maintenance', onClick: () => navigate('settings') },
+        { id: 'indexes', label: 'Manage indexes', onClick: () => navigate('indexes') },
+        { id: 'query', label: 'Query console', onClick: () => navigate('console') },
+        { id: 'sync', label: 'Sync', onClick: () => navigate('sync') },
+      ],
+    },
+    {
+      id: 'help',
+      label: 'Help',
+      items: [
+        { id: 'about', label: 'HakoManager — local-first database manager', onClick: () => setStatus('HakoManager — built on HakoDB') },
+        { id: 'docs', label: 'HakoDB documentation', onClick: () => setStatus('Docs: https://hakodb.github.io/docs/') },
+      ],
+    },
+  ];
 
   return (
     <div className="app-shell">
       <TitleBar />
+      <MenuBar menus={menus} />
       <div className="workbench">
         <IconRail
           activeTab={activeTab}
@@ -302,12 +408,19 @@ export default function App() {
                   onStatus={setStatus}
                 />
               )}
-              {activeTab === 'settings' && <SettingsPage onStatus={setStatus} />}
+              {activeTab === 'settings' && (
+                <SettingsPage
+                  profileId={activeProfileId}
+                  collections={collections.map((item) => item.name)}
+                  onStatus={setStatus}
+                  onRefresh={() => { void refreshCollections(); void pollSync(); }}
+                />
+              )}
             </div>
           </div>
         </main>
       </div>
-      <StatusBar message={status} context={context} />
+      <StatusBar message={status} info={statusInfo} />
       <UpdateBootstrap />
     </div>
   );

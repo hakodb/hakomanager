@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '../api/client';
-import { JsonEditor } from '../components/JsonEditor';
+import { ActionBar, Glyph, Segmented } from '../components/ActionBar';
+import { DataGrid, type DataGridColumn } from '../components/DataGrid';
 import { errorMessage, type CollectionInfo } from '../types';
 
 interface IndexesPageProps {
@@ -10,50 +11,119 @@ interface IndexesPageProps {
   onStatus: (message: string) => void;
 }
 
-const INDEX_KINDS = ['secondary', 'fts', 'vector', 'composite', 'traverse', 'edge'];
+type IndexKind = 'secondary' | 'fts' | 'vector' | 'composite' | 'traverse' | 'edge';
+const INDEX_KINDS: IndexKind[] = ['secondary', 'fts', 'vector', 'composite', 'traverse', 'edge'];
 
-function parseFields(text: string): unknown {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return [];
-  }
+interface IndexRow {
+  id: string;
+  collection: string;
+  kind: string;
+  field: string;
+  detail: string;
+}
+
+const columns: DataGridColumn[] = [
+  { key: 'collection', label: 'Collection' },
+  { key: 'kind', label: 'Type' },
+  { key: 'field', label: 'Field' },
+  { key: 'detail', label: 'Details' },
+];
+
+function serialize(value: unknown): string {
   try {
-    return JSON.parse(trimmed) as unknown;
+    return JSON.stringify(value) ?? '';
   } catch {
-    return trimmed.split(',').map((part) => part.trim()).filter((part) => part !== '');
+    return String(value);
   }
 }
 
+/** index.list is nested JSON; flatten it into readable table rows. */
+function flattenIndexes(raw: unknown): IndexRow[] {
+  const rows: IndexRow[] = [];
+  let ordinal = 0;
+  const walk = (value: unknown, collection: string, kind: string) => {
+    if (Array.isArray(value)) {
+      value.forEach((entry) => walk(entry, collection, kind));
+      return;
+    }
+    if (typeof value !== 'object' || value === null) {
+      rows.push({ id: `row-${++ordinal}`, collection, kind, field: '', detail: String(value) });
+      return;
+    }
+    const source = value as Record<string, unknown>;
+    const nextCollection = typeof source.collection === 'string' ? source.collection : collection;
+    const nextKind =
+      typeof source.kind === 'string'
+        ? source.kind
+        : typeof source.type === 'string'
+          ? source.type
+          : kind;
+    const field =
+      typeof source.field === 'string'
+        ? source.field
+        : typeof source.name === 'string'
+          ? source.name
+          : '';
+    const id =
+      typeof source.id === 'string'
+        ? source.id
+        : typeof source.index_id === 'string'
+          ? source.index_id
+          : `row-${++ordinal}`;
+    const detail = ['fields', 'dim', 'metric', 'unique', 'sparse', 'status']
+      .filter((key) => key in source)
+      .map((key) => `${key}: ${serialize(source[key])}`)
+      .join(' · ');
+    const nested = Object.entries(source).filter(
+      ([key, entry]) =>
+        !['collection', 'kind', 'type', 'field', 'name', 'id', 'index_id'].includes(key) &&
+        (Array.isArray(entry) || (typeof entry === 'object' && entry !== null)),
+    );
+    if (nested.length === 0 || (field && detail)) {
+      rows.push({ id, collection: nextCollection, kind: nextKind, field, detail });
+    } else {
+      nested.forEach(([key, entry]) => walk(entry, nextCollection, key));
+    }
+  };
+  walk(raw, '', '');
+  return rows;
+}
+
+function parseFields(text: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    // fall through to comma-separated form
+  }
+  return text.split(',').map((part) => part.trim()).filter(Boolean);
+}
+
 export function IndexesPage({ profileId, collection, collections, onStatus }: IndexesPageProps) {
-  const [indexList, setIndexList] = useState<unknown>(null);
-  const [createKind, setCreateKind] = useState('secondary');
-  const [createCollection, setCreateCollection] = useState(collection ?? '');
-  const [createField, setCreateField] = useState('');
-  const [dim, setDim] = useState('');
-  const [metric, setMetric] = useState('');
-  const [fieldsJson, setFieldsJson] = useState('["field1", "field2"]');
-  const [dropKind, setDropKind] = useState('secondary');
-  const [dropCollection, setDropCollection] = useState(collection ?? '');
-  const [dropField, setDropField] = useState('');
-  const [dropId, setDropId] = useState('');
+  const [raw, setRaw] = useState<unknown>(null);
+  const [kind, setKind] = useState<IndexKind>('secondary');
+  const [targetCollection, setTargetCollection] = useState(collection ?? '');
+  const [field, setField] = useState('');
+  const [dim, setDim] = useState('384');
+  const [metric, setMetric] = useState('Cosine');
+  const [composite, setComposite] = useState('field1, field2');
+  const [selected, setSelected] = useState<IndexRow | null>(null);
   const [error, setError] = useState('');
 
+  const rows = useMemo(() => flattenIndexes(raw), [raw]);
+
   useEffect(() => {
-    if (collection) {
-      setCreateCollection(collection);
-      setDropCollection(collection);
-    }
+    if (collection) setTargetCollection(collection);
   }, [collection]);
 
   async function refresh() {
     if (!profileId) {
-      setIndexList(null);
+      setRaw(null);
       return;
     }
     setError('');
     try {
-      const result = await invoke<unknown>('index.list', { profileId });
-      setIndexList(result);
+      setRaw(await invoke<unknown>('index.list', { profileId }));
       onStatus('Index list refreshed.');
     } catch (caught) {
       setError(errorMessage(caught));
@@ -62,69 +132,46 @@ export function IndexesPage({ profileId, collection, collections, onStatus }: In
 
   useEffect(() => {
     void refresh();
-    // Reload whenever the active profile changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId]);
 
   async function createIndex() {
     if (!profileId) {
-      setError('Open a database on the Workspace tab first.');
+      setError('Open a database first.');
       return;
     }
-    const name = createCollection.trim();
+    const name = targetCollection.trim();
     if (!name) {
-      setError('Enter a collection for the new index.');
+      setError('Enter a collection.');
       return;
     }
     const args: Record<string, unknown> = { collection: name };
-    const field = createField.trim();
-    if (field) {
-      args.field = field;
+    if (field.trim()) args.field = field.trim();
+    if (kind === 'vector') {
+      args.dim = Number(dim);
+      args.metric = metric.trim();
     }
-    if (createKind === 'vector') {
-      if (dim.trim()) {
-        args.dim = Number(dim);
-      }
-      if (metric.trim()) {
-        args.metric = metric.trim();
-      }
-    }
-    if (createKind === 'composite') {
-      args.fields = parseFields(fieldsJson);
-    }
+    if (kind === 'composite') args.fields = parseFields(composite);
     setError('');
     try {
-      await invoke('index.create', { profileId, kind: createKind, args });
-      onStatus(`Created ${createKind} index on ${name}.`);
+      await invoke('index.create', { profileId, kind, args });
+      onStatus(`Created ${kind} index on ${name}.`);
       await refresh();
     } catch (caught) {
       setError(errorMessage(caught));
     }
   }
 
-  async function dropIndex() {
-    if (!profileId) {
-      setError('Open a database on the Workspace tab first.');
-      return;
-    }
-    const name = dropCollection.trim();
-    if (!name) {
-      setError('Enter the collection of the index to drop.');
-      return;
-    }
-    const args: Record<string, unknown> = { collection: name };
-    const field = dropField.trim();
-    const id = dropId.trim();
-    if (field) {
-      args.field = field;
-    }
-    if (id) {
-      args.id = id;
-    }
+  async function dropSelected() {
+    if (!profileId || !selected) return;
+    const args: Record<string, unknown> = { collection: selected.collection };
+    if (selected.field) args.field = selected.field;
+    if (!selected.id.startsWith('row-')) args.id = selected.id;
     setError('');
     try {
-      await invoke('index.drop', { profileId, kind: dropKind, args });
-      onStatus(`Dropped ${dropKind} index on ${name}.`);
+      await invoke('index.drop', { profileId, kind: selected.kind || kind, args });
+      onStatus(`Dropped index ${selected.id}.`);
+      setSelected(null);
       await refresh();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -133,160 +180,84 @@ export function IndexesPage({ profileId, collection, collections, onStatus }: In
 
   return (
     <div>
-      <datalist id="index-collections">
-        {collections.map((item) => (
-          <option key={item.name} value={item.name} />
-        ))}
-      </datalist>
       <section className="page-section">
-        <h2 className="section-title">Indexes</h2>
-        <div className="field-row">
-          <button type="button" className="button" disabled={!profileId} onClick={() => void refresh()}>
-            Refresh
-          </button>
-        </div>
+        <ActionBar
+          label="Indexes"
+          items={[
+            { id: 'refresh', label: 'Refresh', icon: <Glyph name="refresh" />, onClick: () => void refresh(), disabled: !profileId },
+            { id: 'create', label: 'Create', icon: <Glyph name="plus" />, onClick: () => void createIndex(), disabled: !profileId, primary: true },
+            { id: 'drop', label: 'Drop selected', icon: <Glyph name="trash" />, onClick: () => void dropSelected(), disabled: !profileId || !selected },
+          ]}
+        />
         {error && <div className="inline-error">{error}</div>}
-        {!profileId && <div className="inline-note">Open a database on the Workspace tab to manage indexes.</div>}
+        {!profileId && <div className="inline-note">Open a database first.</div>}
         <div className="panel">
-          <div className="panel-header">index.list</div>
+          <div className="panel-header">Index list ({rows.length})</div>
           <div className="panel-body">
-            <div className="json-view">
-              <JsonEditor
-                value={JSON.stringify(indexList, null, 2) ?? 'null'}
-                onChange={() => undefined}
-                readOnly
+            <div className="grid-scroll">
+              <DataGrid
+                columns={columns}
+                rows={rows.map((row) => ({ ...row }))}
+                onRowClick={(row) => {
+                  setSelected(
+                    rows.find((entry) => entry.id === row.id) ?? null,
+                  );
+                }}
               />
             </div>
+            {selected && (
+              <div className="inline-note">
+                Selected: <code>{selected.collection}/{selected.kind}/{selected.field}</code>
+              </div>
+            )}
           </div>
         </div>
       </section>
 
-      <section className="two-column">
-        <div className="panel">
-          <div className="panel-header">Create index</div>
-          <div className="panel-body">
-            <div className="field-row">
-              <span className="field-label">Kind</span>
-              <select className="field-select" value={createKind} onChange={(event) => setCreateKind(event.target.value)}>
-                {INDEX_KINDS.map((kind) => (
-                  <option key={kind} value={kind}>
-                    {kind}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field-row">
-              <span className="field-label">Collection</span>
-              <input
-                className="field-input field-small"
-                type="text"
-                list="index-collections"
-                value={createCollection}
-                placeholder="Collection name"
-                onChange={(event) => setCreateCollection(event.target.value)}
-              />
-            </div>
-            <div className="field-row">
-              <span className="field-label">Field</span>
-              <input
-                className="field-input field-small"
-                type="text"
-                value={createField}
-                placeholder="Field name"
-                onChange={(event) => setCreateField(event.target.value)}
-              />
-            </div>
-            {createKind === 'vector' && (
-              <div className="field-row">
-                <span className="field-label">Dim / metric</span>
-                <input
-                  className="field-input field-number"
-                  type="number"
-                  min={1}
-                  value={dim}
-                  placeholder="dim"
-                  onChange={(event) => setDim(event.target.value)}
-                />
-                <input
-                  className="field-input field-small"
-                  type="text"
-                  value={metric}
-                  placeholder="metric (e.g. cosine)"
-                  onChange={(event) => setMetric(event.target.value)}
-                />
-              </div>
-            )}
-            {createKind === 'composite' && (
-              <div className="field-row">
-                <span className="field-label">Fields JSON</span>
-                <input
-                  className="field-input"
-                  type="text"
-                  value={fieldsJson}
-                  placeholder='["a", "b"]'
-                  onChange={(event) => setFieldsJson(event.target.value)}
-                />
-              </div>
-            )}
-            <div className="field-row">
-              <button type="button" className="button button-primary" disabled={!profileId} onClick={() => void createIndex()}>
-                Create index
-              </button>
-            </div>
-          </div>
+      <section className="page-section">
+        <h2 className="section-title">New index</h2>
+        <Segmented
+          label="Type"
+          value={kind}
+          options={INDEX_KINDS.map((item) => ({ value: item, label: item }))}
+          onChange={setKind}
+        />
+        <div className="field-row">
+          <span className="field-label">Collection</span>
+          <input
+            className="field-input field-small"
+            list="index-collections"
+            value={targetCollection}
+            placeholder="Collection"
+            onChange={(event) => setTargetCollection(event.target.value)}
+          />
+          <span className="field-label">Field</span>
+          <input
+            className="field-input field-small"
+            value={field}
+            placeholder="Field"
+            onChange={(event) => setField(event.target.value)}
+          />
         </div>
-
-        <div className="panel">
-          <div className="panel-header">Drop index</div>
-          <div className="panel-body">
-            <div className="field-row">
-              <span className="field-label">Kind</span>
-              <select className="field-select" value={dropKind} onChange={(event) => setDropKind(event.target.value)}>
-                {INDEX_KINDS.map((kind) => (
-                  <option key={kind} value={kind}>
-                    {kind}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field-row">
-              <span className="field-label">Collection</span>
-              <input
-                className="field-input field-small"
-                type="text"
-                list="index-collections"
-                value={dropCollection}
-                placeholder="Collection name"
-                onChange={(event) => setDropCollection(event.target.value)}
-              />
-            </div>
-            <div className="field-row">
-              <span className="field-label">Field</span>
-              <input
-                className="field-input field-small"
-                type="text"
-                value={dropField}
-                placeholder="Field name"
-                onChange={(event) => setDropField(event.target.value)}
-              />
-            </div>
-            <div className="field-row">
-              <span className="field-label">Id</span>
-              <input
-                className="field-input field-small"
-                type="text"
-                value={dropId}
-                placeholder="Index id"
-                onChange={(event) => setDropId(event.target.value)}
-              />
-            </div>
-            <div className="field-row">
-              <button type="button" className="button" disabled={!profileId} onClick={() => void dropIndex()}>
-                Drop index
-              </button>
-            </div>
+        {kind === 'vector' && (
+          <div className="field-row">
+            <span className="field-label">Dimensions</span>
+            <input className="field-input field-number" type="number" min={1} value={dim} onChange={(event) => setDim(event.target.value)} />
+            <span className="field-label">Metric</span>
+            <input className="field-input field-small" value={metric} onChange={(event) => setMetric(event.target.value)} />
           </div>
-        </div>
+        )}
+        {kind === 'composite' && (
+          <div className="field-row">
+            <span className="field-label">Fields</span>
+            <input className="field-input" value={composite} placeholder="a, b, c" onChange={(event) => setComposite(event.target.value)} />
+          </div>
+        )}
+        <datalist id="index-collections">
+          {collections.map((item) => (
+            <option key={item.name} value={item.name} />
+          ))}
+        </datalist>
       </section>
     </div>
   );

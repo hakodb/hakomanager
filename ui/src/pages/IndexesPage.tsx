@@ -18,77 +18,115 @@ interface IndexRow {
   id: string;
   collection: string;
   kind: string;
-  field: string;
+  fields: string;
+  order: string;
   detail: string;
 }
 
 const columns: DataGridColumn[] = [
   { key: 'collection', label: 'Collection' },
   { key: 'kind', label: 'Type' },
-  { key: 'field', label: 'Field' },
+  { key: 'fields', label: 'Fields' },
+  { key: 'order', label: 'Order' },
   { key: 'detail', label: 'Details' },
 ];
 
-function serialize(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? '';
-  } catch {
-    return String(value);
-  }
-}
-
-/** index.list is nested JSON; flatten it into readable table rows. */
+/** Map the engine's index.list shape to one row per collection + index type. */
 function flattenIndexes(raw: unknown): IndexRow[] {
   const rows: IndexRow[] = [];
+  if (typeof raw !== 'object' || raw === null) return rows;
+  const source = raw as Record<string, unknown>;
   let ordinal = 0;
-  const walk = (value: unknown, collection: string, kind: string) => {
-    if (Array.isArray(value)) {
-      value.forEach((entry) => walk(entry, collection, kind));
-      return;
-    }
-    if (typeof value !== 'object' || value === null) {
-      rows.push({ id: `row-${++ordinal}`, collection, kind, field: '', detail: String(value) });
-      return;
-    }
-    const source = value as Record<string, unknown>;
-    const nextCollection = typeof source.collection === 'string' ? source.collection : collection;
-    const nextKind =
-      typeof source.kind === 'string'
-        ? source.kind
-        : typeof source.type === 'string'
-          ? source.type
-          : kind;
-    const field =
-      typeof source.field === 'string'
-        ? source.field
-        : typeof source.name === 'string'
-          ? source.name
-          : '';
-    const id =
-      typeof source.id === 'string'
-        ? source.id
-        : typeof source.index_id === 'string'
-          ? source.index_id
-          : `row-${++ordinal}`;
-    const detail = ['fields', 'dim', 'metric', 'unique', 'sparse', 'status']
-      .filter((key) => key in source)
-      .map((key) => `${key}: ${serialize(source[key])}`)
-      .join(' · ');
-    const nested = Object.entries(source).filter(
-      ([key, entry]) =>
-        !['collection', 'kind', 'type', 'field', 'name', 'id', 'index_id'].includes(key) &&
-        (Array.isArray(entry) || (typeof entry === 'object' && entry !== null)),
-    );
-    if (nested.length === 0 || (field && detail)) {
-      rows.push({ id, collection: nextCollection, kind: nextKind, field, detail });
-    } else {
-      nested.forEach(([key, entry]) => walk(entry, nextCollection, key));
+  const push = (collection: string, kind: string, fields: string[], order: string, detail: string) => {
+    rows.push({
+      id: `${kind}-${collection}-${++ordinal}`,
+      collection,
+      kind,
+      fields: fields.join(', '),
+      order: order || '—',
+      detail,
+    });
+  };
+  const map = (key: string, kind: string) => {
+    const entry = source[key];
+    if (typeof entry === 'object' && entry !== null) {
+      for (const [collection, fields] of Object.entries(entry as Record<string, unknown>)) {
+        if (Array.isArray(fields)) {
+          push(collection, kind, fields.map(String), '', '');
+        }
+      }
     }
   };
-  walk(raw, '', '');
+  // engine list_indexes(): {simple, secondary, fts, composite, vector, traverse}
+  map('secondary', 'secondary');
+  map('fts', 'fts');
+
+  const composite = source.composite;
+  if (Array.isArray(composite)) {
+    for (const entry of composite) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const value = entry as Record<string, unknown>;
+      const fields = Array.isArray(value.fields)
+        ? value.fields.map((field) => {
+            if (typeof field === 'object' && field !== null) {
+              const item = field as Record<string, unknown>;
+              return String(item.field ?? '');
+            }
+            return String(field);
+          })
+        : [];
+      const order = Array.isArray(value.fields)
+        ? value.fields
+            .map((field) =>
+              typeof field === 'object' && field !== null
+                ? String((field as Record<string, unknown>).direction ?? '')
+                : '',
+            )
+            .filter(Boolean)
+            .join(', ')
+        : '';
+      push(
+        String(value.collection ?? ''),
+        'composite',
+        fields,
+        order,
+        `id: ${String(value.id ?? '')}${value.unique ? ' · unique' : ''}${value.sparse ? ' · sparse' : ''}`,
+      );
+    }
+  }
+
+  const vector = source.vector;
+  if (typeof vector === 'object' && vector !== null) {
+    for (const [collection, infos] of Object.entries(vector as Record<string, unknown>)) {
+      if (!Array.isArray(infos)) continue;
+      const fields = infos.map((info) =>
+        typeof info === 'object' && info !== null
+          ? String((info as Record<string, unknown>).field ?? '')
+          : String(info),
+      );
+      const dims = infos
+        .map((info) => (typeof info === 'object' && info !== null ? (info as Record<string, unknown>).dim : undefined))
+        .filter((value) => value !== undefined);
+      const metrics = infos
+        .map((info) => (typeof info === 'object' && info !== null ? (info as Record<string, unknown>).metric : undefined))
+        .filter((value) => value !== undefined);
+      push(
+        collection,
+        'vector',
+        fields,
+        '',
+        [dims[0] ? `dim: ${dims[0]}` : '', metrics[0] ? `metric: ${metrics[0]}` : ''].filter(Boolean).join(' · '),
+      );
+    }
+  }
+
+  if (Array.isArray(source.traverse)) {
+    for (const collection of source.traverse) {
+      push(String(collection), 'traverse', [], '', 'edge tracking');
+    }
+  }
   return rows;
 }
-
 function parseFields(text: string): string[] {
   try {
     const parsed: unknown = JSON.parse(text);
@@ -165,7 +203,7 @@ export function IndexesPage({ profileId, collection, collections, onStatus }: In
   async function dropSelected() {
     if (!profileId || !selected) return;
     const args: Record<string, unknown> = { collection: selected.collection };
-    if (selected.field) args.field = selected.field;
+    if (selected.fields) args.field = selected.fields;
     if (!selected.id.startsWith('row-')) args.id = selected.id;
     setError('');
     try {
@@ -207,7 +245,7 @@ export function IndexesPage({ profileId, collection, collections, onStatus }: In
             </div>
             {selected && (
               <div className="inline-note">
-                Selected: <code>{selected.collection}/{selected.kind}/{selected.field}</code>
+                Selected: <code>{selected.collection}/{selected.kind}/{selected.fields}</code>
               </div>
             )}
           </div>

@@ -7,7 +7,6 @@ import {
   loadConsoleState,
   saveConsoleState,
   type CollectionInfo,
-  type ConsoleRow,
   type DocumentView,
 } from '../types';
 
@@ -58,85 +57,55 @@ const BARE: Suggestion[] = [
 ];
 
 const OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'match', 'matchPrefix', 'contains', 'startsWith', 'in', 'notIn', 'arrayContains', 'arrayContainsAny'];
-
-const HISTORY_KEY = 'hakomanager.console.history';
-
-function loadHistory(): string[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
-  } catch {
-    return [];
-  }
-}
+const LAST_KEY = 'hakomanager.console.last';
 
 export function ConsolePage({ profileId, collections, onOpenDocument, onStatus }: ConsolePageProps) {
   const [input, setInput] = useState(() => loadConsoleState().input);
-  const [history, setHistory] = useState<string[]>(loadHistory);
-  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
-  const [rows, setRows] = useState<ConsoleRow[]>(() => loadConsoleState().rows);
+  // Only the last result is kept; no command history list.
+  const [result, setResult] = useState<unknown>(() => loadConsoleState().rows[0]?.result);
   const [busy, setBusy] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Persist the in-progress query and results so the console survives a
-  // restart (capped payload in saveConsoleState).
   useEffect(() => {
-    const timer = window.setTimeout(() => saveConsoleState(input, rows), 300);
+    // Persist the last result with an empty history array (no history UI).
+    const timer = window.setTimeout(() => saveConsoleState(input, []), 300);
     return () => window.clearTimeout(timer);
-  }, [input, rows]);
+  }, [input]);
 
   const suggestions = useMemo<Suggestion[]>(() => {
     const caret = inputRef.current?.selectionStart ?? input.length;
     const before = input.slice(0, caret);
-    const chainMatch = /\.(\w*)$/.exec(before);
-    if (chainMatch) {
-      const typed = chainMatch[1].toLowerCase();
-      return METHODS.filter((method) => method.label.toLowerCase().startsWith(typed));
+    const chain = /\.(\w*)$/.exec(before);
+    if (chain) {
+      return METHODS.filter((item) => item.label.toLowerCase().startsWith(chain[1].toLowerCase()));
     }
-    const whereArgs = /\.(where|or)\(([^()]*)$/.exec(before);
-    if (whereArgs) {
-      const parts = whereArgs[2].split(',');
+    const args = /\.(where|or)\(([^()]*)$/.exec(before);
+    if (args) {
+      const parts = args[2].split(',');
       if (parts.length <= 1) {
-        // Field names: suggest from the selected collection, else all known.
-        const pool = collections.map((item) => item.name);
-        const typed = parts[0].trim().toLowerCase();
         const words = new Set<string>();
-        for (const name of pool) {
-          for (const word of name.split(/[^a-zA-Z0-9]+/)) {
-            if (word) words.add(word.toLowerCase());
-          }
+        for (const item of collections) {
+          for (const word of item.name.split(/[^a-zA-Z0-9]+/)) if (word) words.add(word.toLowerCase());
         }
-        const fields = ['id', 'name', 'price', 'created_at', ...words];
-        return fields
-          .filter((field) => field.toLowerCase().startsWith(typed))
+        return ['id', 'name', 'price', 'created_at', ...words]
+          .filter((field) => field.toLowerCase().startsWith(parts[0].trim().toLowerCase()))
           .map((field) => ({ label: field, detail: 'field', insert: field }));
       }
       if (parts.length === 2) {
-        const typed = parts[1].trim().toLowerCase();
-        return OPS.filter((op) => op.startsWith(typed))
+        return OPS.filter((op) => op.startsWith(parts[1].trim().toLowerCase()))
           .map((op) => ({ label: op, detail: 'operator', insert: op }));
       }
       return [];
     }
-    const starts = /^(\w*)$/.exec(before.trimStart());
-    if (starts && !before.includes('.') && !before.includes(' ')) {
-      const typed = starts[1].toLowerCase();
+    const start = /^(\w*)$/.exec(before.trimStart());
+    if (start && !before.includes('.') && !before.includes(' ')) {
       const pool = [...BARE, ...collections.map((item) => ({
         label: item.name,
         detail: `collection (${item.doc_count} docs)`,
         insert: `${item.name}.`,
       }))];
-      return pool.filter((item) => item.label.toLowerCase().startsWith(typed));
-    }
-    const headCollection = /^(\w[\w-]*)\./.exec(before.trimStart());
-    if (headCollection) {
-      const head = headCollection[1];
-      const known = collections.find((item) => item.name === head);
-      if (known) {
-        return [];
-      }
+      return pool.filter((item) => item.label.toLowerCase().startsWith(start[1].toLowerCase()));
     }
     return [];
   }, [input, collections]);
@@ -147,45 +116,32 @@ export function ConsolePage({ profileId, collections, onOpenDocument, onStatus }
     const caret = inputRef.current?.selectionStart ?? input.length;
     const before = input.slice(0, caret);
     const after = input.slice(caret);
-    let next: string;
-    if (/\.(\w*)$/.test(before)) {
-      next = before.replace(/\.(\w*)$/, `.${suggestion.insert}`) + after;
-    } else if (/(\w*)$/.test(before)) {
-      next = before.replace(/(\w*)$/, suggestion.insert) + after;
-    } else {
-      next = before + suggestion.insert + after;
-    }
+    const next = /\.(\w*)$/.test(before)
+      ? before.replace(/\.(\w*)$/, `.${suggestion.insert}`) + after
+      : /(\w*)$/.test(before)
+        ? before.replace(/(\w*)$/, suggestion.insert) + after
+        : before + suggestion.insert + after;
     setInput(next);
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
-  function updateHistory(command: string) {
-    const next = [command, ...history.filter((item) => item !== command)].slice(0, 50);
-    setHistory(next);
-    try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
-    } catch {
-      // localStorage unavailable: history stays in-memory for this session.
-    }
-  }
-
   async function runCommand(command: string) {
-    if (!profileId || !command.trim()) {
-      return;
+    if (!profileId || !command.trim()) return;
+    try {
+      localStorage.setItem(LAST_KEY, command);
+    } catch {
+      // best effort
     }
     setBusy(true);
-    const at = new Date().toLocaleTimeString();
     try {
-      const result = await invoke<unknown>('query.console', { profileId, input: command });
-      setRows((current) => [{ command, result, error: null, at }, ...current].slice(0, 40));
+      const value = await invoke<unknown>('query.console', { profileId, input: command });
+      setResult(value);
       onStatus(`console: ${command}`);
     } catch (caught) {
-      const message = errorMessage(caught);
-      setRows((current) => [{ command, result: null, error: message, at }, ...current].slice(0, 40));
-      onStatus(message);
+      setResult({ error: errorMessage(caught) });
+      onStatus(errorMessage(caught));
     } finally {
       setBusy(false);
-      setHistoryIndex(null);
     }
   }
 
@@ -201,7 +157,7 @@ export function ConsolePage({ profileId, collections, onOpenDocument, onStatus }
         setActiveSuggestion((index) => Math.max(index - 1, 0));
         return;
       }
-      if (event.key === 'Tab' || (event.key === 'Enter' && suggestions.length > 0 && input.trim().length > 0 && !input.includes('(') && !input.includes('.'))) {
+      if (event.key === 'Tab') {
         event.preventDefault();
         acceptSuggestion(suggestions[Math.min(activeSuggestion, suggestions.length - 1)]);
         setActiveSuggestion(0);
@@ -209,49 +165,31 @@ export function ConsolePage({ profileId, collections, onOpenDocument, onStatus }
       }
       if (event.key === 'Escape') {
         setActiveSuggestion(0);
-        setInput(input);
         return;
       }
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      const command = input.trim();
-      if (!command) return;
-      if (history[0] !== command) updateHistory(command);
-      void runCommand(command);
+      void runCommand(input.trim());
       return;
     }
     if (event.key === 'ArrowUp' && !suggestionOpen) {
-      if (history.length === 0) return;
-      event.preventDefault();
-      const next = historyIndex === null ? 0 : Math.min(historyIndex + 1, history.length - 1);
-      setHistoryIndex(next);
-      setInput(history[next]);
-    }
-    if (event.key === 'ArrowDown' && !suggestionOpen && historyIndex !== null) {
-      event.preventDefault();
-      const next = historyIndex - 1;
-      if (next < 0) {
-        setHistoryIndex(null);
-        setInput('');
-      } else {
-        setHistoryIndex(next);
-        setInput(history[next]);
+      const last = localStorage.getItem(LAST_KEY);
+      if (last) {
+        event.preventDefault();
+        setInput(last);
       }
     }
   }
 
-  function renderResult(result: unknown): {
+  function renderResult(value: unknown): {
     documents: DocumentView[] | null;
     grid: Record<string, unknown>[] | null;
     columns: DataGridColumn[];
   } {
-    if (Array.isArray(result) && result.length > 0 && typeof result[0] === 'object' && result[0] !== null) {
-      const objects = result.filter(
-        (row): row is Record<string, unknown> => typeof row === 'object' && row !== null,
-      );
-      const looksLikeDocuments = objects.every((row) => 'id' in row && 'data' in row);
-      if (looksLikeDocuments) {
+    if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
+      const objects = value.filter((row): row is Record<string, unknown> => typeof row === 'object' && row !== null);
+      if (objects.every((row) => 'id' in row && 'data' in row)) {
         return {
           documents: objects.map((row) => ({
             collection: typeof row.collection === 'string' ? row.collection : '',
@@ -262,27 +200,25 @@ export function ConsolePage({ profileId, collections, onOpenDocument, onStatus }
           columns: [],
         };
       }
-      return { documents: null, grid: objects, columns: gridColumns(objects[0]) };
+      return { documents: null, grid: objects, columns: Object.keys(objects[0]).map((key) => ({ key, label: key })) };
     }
     return { documents: null, grid: null, columns: [] };
   }
+
+  const view = renderResult(result);
 
   return (
     <section className="page">
       <div className="page-section">
         <p className="page-hint">
-          Fluent queries (<code>products.where(price,gte,10000).orderBy(name).limit(10).select(name,price)</code>)
-          and commands (<code>collections</code>, <code>docs &lt;collection&gt;</code>, <code>get &lt;collection&gt; &lt;id&gt;</code>, <code>put</code>, <code>del</code>, <code>stats</code>, <code>indexes</code>, <code>compact</code>, <code>backup</code>, <code>search</code>...).
-          Tab completes · ↑/↓ history.
+          Fluent queries and commands. Tab completes, ↑ recalls the last command.
         </p>
-      </div>
-      <div className="page-section">
         <div className="console-input-row">
           <input
             ref={inputRef}
             className="console-input"
             value={input}
-            placeholder="Type a command…  (Tab completes, ↑ history)"
+            placeholder="Type a command…"
             onChange={(event) => {
               setInput(event.target.value);
               setActiveSuggestion(0);
@@ -294,12 +230,7 @@ export function ConsolePage({ profileId, collections, onOpenDocument, onStatus }
           <button
             type="button"
             className="button button-primary"
-            onClick={() => {
-              const command = input.trim();
-              if (!command) return;
-              if (history[0] !== command) updateHistory(command);
-              void runCommand(command);
-            }}
+            onClick={() => void runCommand(input.trim())}
             disabled={!profileId || busy || !input.trim()}
           >
             Run
@@ -323,38 +254,20 @@ export function ConsolePage({ profileId, collections, onOpenDocument, onStatus }
           </ul>
         )}
       </div>
-      <div className="console-history">
-        {rows.length === 0 && <p className="page-hint">No commands yet.</p>}
-        {rows.map((row, index) => {
-          const { documents, grid, columns } = renderResult(row.result);
-          return (
-            <details key={`${row.at}-${index}`} open={index === 0} className="console-entry">
-              <summary>
-                <code>{row.command}</code>
-                {row.error ? <span className="console-error">✗ {row.error}</span> : <span className="console-ok">✓ {row.at}</span>}
-              </summary>
-              {documents ? (
-                <DocumentList
-                  documents={documents}
-                  onOpenDocument={(id, fromRow) => onOpenDocument(id, fromRow || documents[0]?.collection)}
-                  onStatus={onStatus}
-                />
-              ) : grid ? (
-                <DataGrid columns={columns} rows={grid} />
-              ) : (
-                <pre className="console-json">{JSON.stringify(row.result ?? row.error, null, 2)}</pre>
-              )}
-            </details>
-          );
-        })}
+      <div className="console-result">
+        {result === undefined && <p className="page-hint">Run a command to see results here.</p>}
+        {view.documents ? (
+          <DocumentList
+            documents={view.documents}
+            onOpenDocument={(id, fromRow) => onOpenDocument(id, fromRow || view.documents?.[0]?.collection)}
+            onStatus={onStatus}
+          />
+        ) : view.grid ? (
+          <DataGrid columns={view.columns} rows={view.grid} />
+        ) : result !== undefined ? (
+          <pre className="console-json">{JSON.stringify(result, null, 2)}</pre>
+        ) : null}
       </div>
     </section>
   );
-}
-
-function gridColumns(sample: Record<string, unknown>): DataGridColumn[] {
-  return Object.keys(sample).map((key) => ({
-    key,
-    label: key,
-  }));
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '../api/client';
+import { ActionBar } from '../components/ActionBar';
 import { JsonEditor } from '../components/JsonEditor';
-import { ActionBar, Glyph } from '../components/ActionBar';
 import { errorMessage, type CollectionInfo } from '../types';
 
 interface OpsPageProps {
@@ -27,70 +27,32 @@ function pretty(value: unknown): string {
   }
 }
 
-interface ResultPanelProps {
-  title: string;
-  value: unknown;
-  error?: string;
-  onRefresh?: () => void;
-}
-
-function ResultPanel({ title, value, error, onRefresh }: ResultPanelProps) {
-  return (
-    <div className="panel">
-      <div className="panel-header">
-        <span>{title}</span>
-        {onRefresh && (
-          <button type="button" className="button button-compact" onClick={onRefresh}>
-            Refresh
-          </button>
-        )}
-      </div>
-      <div className="panel-body">
-        {error && <div className="inline-error">{error}</div>}
-        <div className="json-view">
-          <JsonEditor value={pretty(value)} onChange={() => undefined} readOnly />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function OpsPage({ profileId, collection, collections, onStatus }: OpsPageProps) {
   const [collectionName, setCollectionName] = useState(collection ?? '');
   const [field, setField] = useState('');
   const [schemaText, setSchemaText] = useState('{}');
-  const [restoreId, setRestoreId] = useState('');
-  const [backupPath, setBackupPath] = useState('');
   const [rules, setRules] = useState<Rule[]>([
     { collectionPrefix: '', op: 'get', allow: true },
   ]);
   const [results, setResults] = useState<Record<string, unknown>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [active, setActive] = useState<string | null>(null);
 
   useEffect(() => {
-    if (collection) {
-      setCollectionName(collection);
-    }
+    if (collection) setCollectionName(collection);
   }, [collection]);
 
-  function requireProfile(): boolean {
-    if (!profileId) {
-      const message = 'Open a database on the Workspace tab first.';
-      setErrors((current) => ({ ...current, global: message }));
-      return false;
-    }
-    return true;
-  }
-
   async function run(key: string, op: string, args: Record<string, unknown>) {
-    if (!requireProfile()) {
+    if (!profileId) {
+      setErrors((current) => ({ ...current, global: 'Open a database first.' }));
       return;
     }
+    setActive(key);
     setBusy(true);
     setErrors((current) => ({ ...current, [key]: '', global: '' }));
     try {
-      const result = await invoke<unknown>(op, args);
+      const result = await invoke<unknown>(op, { profileId, ...args });
       setResults((current) => ({ ...current, [key]: result }));
       onStatus(`${op} completed.`);
     } catch (caught) {
@@ -100,26 +62,9 @@ export function OpsPage({ profileId, collection, collections, onStatus }: OpsPag
     }
   }
 
-  function withOptionalCollection(): Record<string, unknown> {
-    const args: Record<string, unknown> = { profileId };
+  function collectionArgs(): Record<string, unknown> {
     const name = collectionName.trim();
-    if (name) {
-      args.collection = name;
-    }
-    return args;
-  }
-
-  function setCollectionArg(args: Record<string, unknown>): boolean {
-    const name = collectionName.trim();
-    if (!name) {
-      setErrors((current) => ({
-        ...current,
-        global: 'Enter a collection name (or select one from the sidebar).',
-      }));
-      return false;
-    }
-    args.collection = name;
-    return true;
+    return name ? { collection: name } : {};
   }
 
   async function setSchema() {
@@ -134,178 +79,45 @@ export function OpsPage({ profileId, collection, collections, onStatus }: OpsPag
       setErrors((current) => ({ ...current, schemaSet: 'Schema must be a JSON object.' }));
       return;
     }
-    const args: Record<string, unknown> = { profileId };
-    if (!setCollectionArg(args)) {
-      return;
-    }
-    args.schema = schema;
-    await run('schemaSet', 'ops.schemaSet', args);
+    await run('schemaSet', 'ops.schemaSet', { ...collectionArgs(), schema });
   }
 
-  async function clearSchema() {
-    const args: Record<string, unknown> = { profileId };
-    if (!setCollectionArg(args)) {
-      return;
-    }
-    await run('schemaClear', 'ops.schemaClear', args);
-  }
-
-  async function restore() {
-    const args: Record<string, unknown> = { profileId };
-    if (!setCollectionArg(args)) {
-      return;
-    }
-    const id = restoreId.trim();
-    if (!id) {
-      setErrors((current) => ({ ...current, restore: 'Enter a document id to restore.' }));
-      return;
-    }
-    args.id = id;
-    await run('restore', 'ops.restore', args);
-  }
-
-  async function inspectIndex() {
-    const args: Record<string, unknown> = { profileId };
-    if (!setCollectionArg(args)) {
-      return;
-    }
-    if (!field.trim()) {
-      setErrors((current) => ({ ...current, inspectIndex: 'Enter a field to inspect.' }));
-      return;
-    }
-    args.field = field.trim();
-    await run('inspectIndex', 'ops.inspectIndex', args);
-  }
-
-  async function storageKeys() {
-    const args: Record<string, unknown> = { profileId };
-    if (!setCollectionArg(args)) {
-      return;
-    }
-    await run('storageKeys', 'ops.storageKeys', args);
-  }
-
-  async function vacuum() {
-    const args: Record<string, unknown> = { profileId };
-    if (!setCollectionArg(args)) {
-      return;
-    }
-    if (!window.confirm(`Vacuum collection "${collectionName.trim()}"? This may take a while.`)) {
-      return;
-    }
-    await run('vacuum', 'ops.vacuum', args);
-  }
-
-  async function backup() {
-    const path = backupPath.trim();
-    if (!path) {
-      setErrors((current) => ({ ...current, backup: 'Enter a destination path for the backup.' }));
-      return;
-    }
-    if (!window.confirm(`Create a backup at "${path}"?`)) {
-      return;
-    }
-    await run('backup', 'ops.backup', { profileId, path });
-  }
-
-  async function setSecurityRules() {
-    const cleanRules = rules
+  async function applyRules() {
+    const clean = rules
       .filter((rule) => rule.collectionPrefix.trim() !== '')
-      .map((rule) => ({
-        collectionPrefix: rule.collectionPrefix.trim(),
-        op: rule.op,
-        allow: rule.allow,
-      }));
-    if (cleanRules.length === 0) {
-      setErrors((current) => ({
-        ...current,
-        securitySet: 'Add at least one rule with a collection prefix.',
-      }));
+      .map((rule) => ({ collectionPrefix: rule.collectionPrefix.trim(), op: rule.op, allow: rule.allow }));
+    if (clean.length === 0) {
+      setErrors((current) => ({ ...current, securitySet: 'Add at least one rule.' }));
       return;
     }
-    await run('securitySet', 'ops.securitySet', { profileId, rules: cleanRules });
+    await run('securitySet', 'ops.securitySet', { rules: clean });
   }
 
-  function updateRule(index: number, patch: Partial<Rule>) {
-    setRules((current) => current.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)));
-  }
-
-  function removeRule(index: number) {
-    setRules((current) => current.filter((_, i) => i !== index));
-  }
-
-  const panel = (
-    key: string,
-    title: string,
-    refresh?: { op: string; args: () => Record<string, unknown> }
-  ) => (
-    <ResultPanel
-      title={title}
-      value={results[key]}
-      error={errors[key]}
-      onRefresh={refresh ? () => void run(key, refresh.op, refresh.args()) : undefined}
-    />
-  );
+  const actions = [
+    { id: 'schemaList', label: 'Schema', icon: 'layers' as const, onClick: () => void run('schemaList', 'ops.schemaList', {}) },
+    { id: 'schemaSet', label: 'Set schema', icon: 'plus' as const, onClick: () => void setSchema() },
+    { id: 'schemaClear', label: 'Clear schema', icon: 'minus' as const, onClick: () => void run('schemaClear', 'ops.schemaClear', collectionArgs()) },
+    { id: 'inspectIndex', label: 'Inspect index', icon: 'info' as const, onClick: () => void run('inspectIndex', 'ops.inspectIndex', { ...collectionArgs(), field: field.trim() }) },
+    { id: 'storageKeys', label: 'Storage keys', icon: 'layers' as const, onClick: () => void run('storageKeys', 'ops.storageKeys', collectionArgs()) },
+    { id: 'snapshotIndexes', label: 'Snapshot', icon: 'save' as const, onClick: () => void run('snapshotIndexes', 'ops.snapshotIndexes', {}) },
+    { id: 'securitySet', label: 'Apply rules', icon: 'settings' as const, onClick: () => void applyRules() },
+  ].map((item) => ({ ...item, disabled: busy || !profileId, active: active === item.id }));
 
   return (
     <div>
-      <section className="page-section">
-        <div className="two-column">
-          {Object.entries(results).map(([key, value]) => (
-            <ResultPanel key={key} title={`ops.${key}`} value={value} error={errors[key]} />
-          ))}
-        </div>
-      </section>
-      <datalist id="ops-collections">
-        {collections.map((item) => (
-          <option key={item.name} value={item.name} />
-        ))}
-      </datalist>
       {errors.global && <div className="inline-error">{errors.global}</div>}
-      {!profileId && (
-        <div className="inline-note">Open a database on the Workspace tab to run operations.</div>
-      )}
-      {busy && <div className="inline-note">Working...</div>}
-
+      {!profileId && <div className="inline-note">Open a database first.</div>}
       <section className="page-section">
         <div className="options-strip">
           <label className="option-field"><span>Collection</span><input className="field-input field-small" list="ops-collections" value={collectionName} placeholder="defaults to all" onChange={(event) => setCollectionName(event.target.value)} /></label>
           <label className="option-field"><span>Field</span><input className="field-input field-small" value={field} placeholder="Field name" onChange={(event) => setField(event.target.value)} /></label>
-          <label className="option-field"><span>Backup path</span><input className="field-input field-small" value={backupPath} placeholder="/path/to/backup" onChange={(event) => setBackupPath(event.target.value)} /></label>
-          <label className="option-field"><span>Restore id</span><input className="field-input field-small" value={restoreId} placeholder="Document id" onChange={(event) => setRestoreId(event.target.value)} /></label>
         </div>
-        <ActionBar
-          label="Operations"
-          items={[
-            { id: 'quiescence', label: 'Quiescence', icon: <Glyph name="clock" />, onClick: () => void run('quiescence', 'ops.quiescence', { profileId }) },
-            { id: 'stats', label: 'Stats', icon: <Glyph name="gauge" />, onClick: () => void run('stats', 'ops.stats', { profileId }) },
-            { id: 'schemaList', label: 'Schema', icon: <Glyph name="layers" />, onClick: () => void run('schemaList', 'ops.schemaList', { profileId }) },
-            { id: 'schemaSet', label: 'Set schema', icon: <Glyph name="plus" />, onClick: () => void setSchema() },
-            { id: 'schemaClear', label: 'Clear schema', icon: <Glyph name="minus" />, onClick: () => void clearSchema() },
-            { id: 'audit', label: 'Audit', icon: <Glyph name="info" />, onClick: () => void run('audit', 'ops.audit', { profileId }) },
-            { id: 'restoreAvailable', label: 'Deleted', icon: <Glyph name="search" />, onClick: () => void run('restoreAvailable', 'ops.restoreAvailable', withOptionalCollection()) },
-            { id: 'deleteQueue', label: 'Queue', icon: <Glyph name="layers" />, onClick: () => void run('deleteQueue', 'ops.deleteQueue', withOptionalCollection()) },
-            { id: 'restore', label: 'Restore', icon: <Glyph name="upload" />, onClick: () => void restore() },
-            { id: 'sweep', label: 'Sweep', icon: <Glyph name="refresh" />, onClick: () => void run('sweep', 'ops.sweep', { profileId }) },
-            { id: 'inspectIndex', label: 'Inspect index', icon: <Glyph name="info" />, onClick: () => void inspectIndex() },
-            { id: 'storageKeys', label: 'Storage keys', icon: <Glyph name="layers" />, onClick: () => void storageKeys() },
-            { id: 'snapshotIndexes', label: 'Snapshot', icon: <Glyph name="save" />, onClick: () => void run('snapshotIndexes', 'ops.snapshotIndexes', { profileId }) },
-            { id: 'versions', label: 'Versions', icon: <Glyph name="clock" />, onClick: () => void run('versions', 'ops.versions', { profileId }) },
-            { id: 'flush', label: 'Flush', icon: <Glyph name="save" />, onClick: () => void run('flush', 'ops.flush', { profileId }) },
-            { id: 'compact', label: 'Compact', icon: <Glyph name="layers" />, onClick: () => void run('compact', 'ops.compact', withOptionalCollection()) },
-            { id: 'vacuum', label: 'Vacuum', icon: <Glyph name="refresh" />, onClick: () => void vacuum() },
-            { id: 'backup', label: 'Backup', icon: <Glyph name="download" />, onClick: () => void backup() },
-            { id: 'securitySet', label: 'Apply rules', icon: <Glyph name="settings" />, onClick: () => void setSecurityRules() },
-          ].map((item) => ({ ...item, disabled: busy || !profileId }))}
-        />
-        {(errors.global || errors.schemaSet || errors.schemaClear || errors.restore || errors.inspectIndex || errors.securitySet || errors.vacuum || errors.backup) && (
-          <div className="inline-error">
-            {errors.global || errors.schemaSet || errors.schemaClear || errors.restore || errors.inspectIndex || errors.securitySet || errors.vacuum || errors.backup}
-          </div>
-        )}
-        {!profileId && <div className="inline-note">Open a database first.</div>}
+        <datalist id="ops-collections">
+          {collections.map((item) => <option key={item.name} value={item.name} />)}
+        </datalist>
+        <ActionBar label="Investigation" items={actions} />
         <details className="advanced-options">
-          <summary>Advanced (schema JSON, security rules)</summary>
+          <summary>Schema JSON and security rules</summary>
           <div className="editor-pane"><JsonEditor value={schemaText} onChange={setSchemaText} /></div>
           <div className="grid-scroll">
             <table className="datagrid">
@@ -313,10 +125,10 @@ export function OpsPage({ profileId, collection, collections, onStatus }: OpsPag
               <tbody>
                 {rules.map((rule, index) => (
                   <tr key={index}>
-                    <td><input className="field-input field-small" value={rule.collectionPrefix} placeholder="docs/" onChange={(event) => updateRule(index, { collectionPrefix: event.target.value })} /></td>
-                    <td><select className="field-select" value={rule.op} onChange={(event) => updateRule(index, { op: event.target.value })}>{RULE_OPS.map((op) => <option key={op} value={op}>{op}</option>)}</select></td>
-                    <td><label className="field-checkbox"><input type="checkbox" checked={rule.allow} onChange={(event) => updateRule(index, { allow: event.target.checked })} /> Allow</label></td>
-                    <td><button type="button" className="button button-compact" onClick={() => removeRule(index)}>Remove</button></td>
+                    <td><input className="field-input field-small" value={rule.collectionPrefix} placeholder="docs/" onChange={(event) => setRules((current) => current.map((item, i) => (i === index ? { ...item, collectionPrefix: event.target.value } : item)))} /></td>
+                    <td><select className="field-select" value={rule.op} onChange={(event) => setRules((current) => current.map((item, i) => (i === index ? { ...item, op: event.target.value } : item)))}>{RULE_OPS.map((op) => <option key={op} value={op}>{op}</option>)}</select></td>
+                    <td><label className="field-checkbox"><input type="checkbox" checked={rule.allow} onChange={(event) => setRules((current) => current.map((item, i) => (i === index ? { ...item, allow: event.target.checked } : item)))} /> Allow</label></td>
+                    <td><button type="button" className="button button-compact" onClick={() => setRules((current) => current.filter((_, i) => i !== index))}>Remove</button></td>
                   </tr>
                 ))}
                 {rules.length === 0 && <tr><td className="datagrid-empty" colSpan={4}>No rules</td></tr>}
@@ -326,266 +138,17 @@ export function OpsPage({ profileId, collection, collections, onStatus }: OpsPag
           <button type="button" className="button" onClick={() => setRules((current) => [...current, { collectionPrefix: '', op: 'get', allow: true }])}>Add rule</button>
         </details>
       </section>
-
-      <section className="page-section">
-        <h2 className="section-title">Quiescence and stats</h2>
-        <div className="two-column">
-          <ResultPanel
-            title="ops.quiescence"
-            value={results.quiescence}
-            error={errors.quiescence}
-            onRefresh={() => void run('quiescence', 'ops.quiescence', { profileId })}
-          />
-          <ResultPanel
-            title="ops.stats"
-            value={results.stats}
-            error={errors.stats}
-            onRefresh={() => void run('stats', 'ops.stats', { profileId })}
-          />
-        </div>
-      </section>
-
-      <section className="page-section">
-        <h2 className="section-title">Schema</h2>
-        <div className="field-row">
-          <button type="button" className="button" disabled={busy} onClick={() => void run('schemaList', 'ops.schemaList', { profileId })}>
-            Refresh schema list
-          </button>
-          <button type="button" className="button" disabled={busy} onClick={() => void setSchema()}>
-            Set schema
-          </button>
-          <button type="button" className="button" disabled={busy} onClick={() => void clearSchema()}>
-            Clear schema
-          </button>
-        </div>
-        {errors.schemaSet && <div className="inline-error">{errors.schemaSet}</div>}
-        {errors.schemaClear && <div className="inline-error">{errors.schemaClear}</div>}
-        <div className="editor-pane">
-          <JsonEditor value={schemaText} onChange={setSchemaText} />
-        </div>
-        {panel('schemaList', 'ops.schemaList', {
-          op: 'ops.schemaList',
-          args: () => ({ profileId }),
-        })}
-      </section>
-
-      <section className="page-section">
-        <h2 className="section-title">Audit</h2>
-        <div className="field-row">
-          <button type="button" className="button" disabled={busy} onClick={() => void run('audit', 'ops.audit', { profileId })}>
-            Refresh audit
-          </button>
-        </div>
-        {panel('audit', 'ops.audit', { op: 'ops.audit', args: () => ({ profileId }) })}
-      </section>
-
-      <section className="page-section">
-        <h2 className="section-title">Soft delete</h2>
-        <div className="field-row">
-          <button
-            type="button"
-            className="button"
-            disabled={busy}
-            onClick={() => void run('restoreAvailable', 'ops.restoreAvailable', withOptionalCollection())}
-          >
-            Restore available
-          </button>
-          <button
-            type="button"
-            className="button"
-            disabled={busy}
-            onClick={() => void run('deleteQueue', 'ops.deleteQueue', withOptionalCollection())}
-          >
-            Delete queue
-          </button>
-          <span className="field-label">Id</span>
-          <input
-            className="field-input field-small"
-            type="text"
-            value={restoreId}
-            placeholder="Document id to restore"
-            onChange={(event) => setRestoreId(event.target.value)}
-          />
-          <button type="button" className="button" disabled={busy} onClick={() => void restore()}>
-            Restore
-          </button>
-          <button type="button" className="button" disabled={busy} onClick={() => void run('sweep', 'ops.sweep', { profileId })}>
-            Sweep
-          </button>
-        </div>
-        {errors.restore && <div className="inline-error">{errors.restore}</div>}
-        <div className="two-column">
-          {panel('restoreAvailable', 'ops.restoreAvailable', {
-            op: 'ops.restoreAvailable',
-            args: withOptionalCollection,
-          })}
-          {panel('deleteQueue', 'ops.deleteQueue', {
-            op: 'ops.deleteQueue',
-            args: withOptionalCollection,
-          })}
-        </div>
-      </section>
-
-      <section className="page-section">
-        <h2 className="section-title">Index inspection</h2>
-        <div className="field-row">
-          <button type="button" className="button" disabled={busy} onClick={() => void inspectIndex()}>
-            Inspect index
-          </button>
-          <button type="button" className="button" disabled={busy} onClick={() => void storageKeys()}>
-            Storage keys
-          </button>
-          <button type="button" className="button" disabled={busy} onClick={() => void run('snapshotIndexes', 'ops.snapshotIndexes', { profileId })}>
-            Snapshot indexes
-          </button>
-          <button type="button" className="button" disabled={busy} onClick={() => void run('versions', 'ops.versions', { profileId })}>
-            Versions
-          </button>
-        </div>
-        {errors.inspectIndex && <div className="inline-error">{errors.inspectIndex}</div>}
-        <div className="two-column">
-          {panel('inspectIndex', 'ops.inspectIndex')}
-          {panel('storageKeys', 'ops.storageKeys', {
-            op: 'ops.storageKeys',
-            args: withOptionalCollection,
-          })}
-          {panel('snapshotIndexes', 'ops.snapshotIndexes', {
-            op: 'ops.snapshotIndexes',
-            args: () => ({ profileId }),
-          })}
-          {panel('versions', 'ops.versions', {
-            op: 'ops.versions',
-            args: () => ({ profileId }),
-          })}
-        </div>
-      </section>
-
-      <section className="page-section">
-        <h2 className="section-title">Security rules</h2>
-        <div className="grid-scroll">
-          <table className="datagrid">
-            <thead>
-              <tr>
-                <th scope="col">Collection prefix</th>
-                <th scope="col">Operation</th>
-                <th scope="col">Allow</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rules.map((rule, index) => (
-                <tr key={index}>
-                  <td>
-                    <input
-                      className="field-input field-small"
-                      type="text"
-                      value={rule.collectionPrefix}
-                      placeholder="docs/"
-                      onChange={(event) => updateRule(index, { collectionPrefix: event.target.value })}
-                    />
-                  </td>
-                  <td>
-                    <select
-                      className="field-select"
-                      value={rule.op}
-                      onChange={(event) => updateRule(index, { op: event.target.value })}
-                    >
-                      {RULE_OPS.map((op) => (
-                        <option key={op} value={op}>
-                          {op}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <label className="field-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={rule.allow}
-                        onChange={(event) => updateRule(index, { allow: event.target.checked })}
-                      />
-                      Allow
-                    </label>
-                  </td>
-                  <td>
-                    <button type="button" className="button button-compact" onClick={() => removeRule(index)}>
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {rules.length === 0 && (
-                <tr>
-                  <td className="datagrid-empty" colSpan={4}>
-                    No rules
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="field-row">
-          <button
-            type="button"
-            className="button"
-            onClick={() => setRules((current) => [...current, { collectionPrefix: '', op: 'get', allow: true }])}
-          >
-            Add rule
-          </button>
-          <button type="button" className="button button-primary" disabled={busy} onClick={() => void setSecurityRules()}>
-            Set rules
-          </button>
-        </div>
-        {errors.securitySet && <div className="inline-error">{errors.securitySet}</div>}
-        {panel('securitySet', 'ops.securitySet')}
-      </section>
-
-      <section className="page-section">
-        <h2 className="section-title">Maintenance</h2>
-        <div className="field-row">
-          <button type="button" className="button" disabled={busy} onClick={() => void run('flush', 'ops.flush', { profileId })}>
-            Flush
-          </button>
-          <button
-            type="button"
-            className="button"
-            disabled={busy}
-            onClick={() => void run('compact', 'ops.compact', withOptionalCollection())}
-          >
-            Compact
-          </button>
-          <button type="button" className="button" disabled={busy} onClick={() => void vacuum()}>
-            Vacuum
-          </button>
-        </div>
-        <div className="field-row">
-          <span className="field-label">Backup path</span>
-          <input
-            className="field-input"
-            type="text"
-            value={backupPath}
-            placeholder="/path/to/backup.zip"
-            onChange={(event) => setBackupPath(event.target.value)}
-          />
-          <button type="button" className="button" disabled={busy} onClick={() => void backup()}>
-            Backup
-          </button>
-        </div>
-        {errors.vacuum && <div className="inline-error">{errors.vacuum}</div>}
-        {errors.backup && <div className="inline-error">{errors.backup}</div>}
-        <div className="inline-note">
-          Compact without a collection name targets all collections. Vacuum and backup ask for confirmation.
-        </div>
-        <div className="two-column">
-          {panel('flush', 'ops.flush', { op: 'ops.flush', args: () => ({ profileId }) })}
-          {panel('compact', 'ops.compact', {
-            op: 'ops.compact',
-            args: withOptionalCollection,
-          })}
-          {panel('vacuum', 'ops.vacuum')}
-          {panel('backup', 'ops.backup')}
-        </div>
-      </section>
+      {active && (
+        <section className="page-section">
+          <div className="panel">
+            <div className="panel-header">ops.{active}</div>
+            <div className="panel-body">
+              {errors[active] && <div className="inline-error">{errors[active]}</div>}
+              <div className="json-view"><JsonEditor value={pretty(results[active])} onChange={() => undefined} readOnly /></div>
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

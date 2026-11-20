@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '../api/client';
+import { ActionBar, Glyph } from '../components/ActionBar';
 import { DocumentList } from '../components/DocumentList';
 import { JsonEditor } from '../components/JsonEditor';
 import { errorMessage, type CollectionInfo, type DocumentView } from '../types';
@@ -178,64 +179,22 @@ export function QueryPage({ profileId, collection, collections, onOpenDocument, 
   return (
     <div>
       <section className="page-section">
-        <h2 className="section-title">Query specification</h2>
-        <div className="field-row">
-          <span className="field-label">Collection</span>
-          <select
-            className="field-select"
-            value={collectionName}
-            onChange={(event) => setCollectionName(event.target.value)}
-          >
-            <option value="">Select collection</option>
-            {collections.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <span className="field-label">Order by</span>
-          <input
-            className="field-input field-small"
-            type="text"
-            value={orderBy}
-            placeholder="field or field:desc"
-            onChange={(event) => setOrderBy(event.target.value)}
-          />
-          <span className="field-label">Select</span>
-          <input
-            className="field-input field-small"
-            type="text"
-            value={select}
-            placeholder="field1, field2"
-            onChange={(event) => setSelect(event.target.value)}
-          />
-        </div>
-        <div className="field-row">
-          <span className="field-label">Limit</span>
-          <input
-            className="field-input field-number"
-            type="number"
-            min={0}
-            value={limit}
-            onChange={(event) => setLimit(Number(event.target.value))}
-          />
-          <span className="field-label">Offset</span>
-          <input
-            className="field-input field-number"
-            type="number"
-            min={0}
-            value={offset}
-            onChange={(event) => setOffset(Number(event.target.value))}
-          />
-          <button type="button" className="button button-primary" disabled={busy} onClick={() => void runQuery()}>
-            Run
-          </button>
-          <button type="button" className="button" disabled={busy} onClick={() => void explainQuery()}>
-            Explain
-          </button>
+        <ActionBar
+          label="Query actions"
+          items={[
+            { id: 'run', label: 'Run query', icon: <Glyph name="play" />, onClick: () => void runQuery(), disabled: busy, primary: true },
+            { id: 'explain', label: 'Explain plan', icon: <Glyph name="info" />, onClick: () => void explainQuery(), disabled: busy },
+          ]}
+        />
+        <div className="options-strip">
+          <label className="option-field"><span>Collection</span><select className="field-select" value={collectionName} onChange={(event) => setCollectionName(event.target.value)}><option value="">Select</option>{collections.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
+          <label className="option-field"><span>Order by</span><input className="field-input field-small" value={orderBy} placeholder="field or field:desc" onChange={(event) => setOrderBy(event.target.value)} /></label>
+          <label className="option-field"><span>Select</span><input className="field-input field-small" value={select} placeholder="field1, field2" onChange={(event) => setSelect(event.target.value)} /></label>
+          <label className="option-field"><span>Limit</span><input className="field-input field-number" type="number" min={0} value={limit} onChange={(event) => setLimit(Number(event.target.value))} /></label>
+          <label className="option-field"><span>Offset</span><input className="field-input field-number" type="number" min={0} value={offset} onChange={(event) => setOffset(Number(event.target.value))} /></label>
         </div>
         {error && <div className="inline-error">{error}</div>}
-        {!profileId && <div className="inline-note">Open a database on the Workspace tab before running queries.</div>}
+        {!profileId && <div className="inline-note">Open a database first.</div>}
       </section>
 
       <section className="page-section">

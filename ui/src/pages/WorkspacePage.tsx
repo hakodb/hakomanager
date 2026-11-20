@@ -22,6 +22,7 @@ export function WorkspacePage({
   const [path, setPath] = useState('');
   const [readOnly, setReadOnly] = useState(false);
   const [encryptionKey, setEncryptionKey] = useState('');
+  const [encryptedCollections, setEncryptedCollections] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -59,6 +60,7 @@ export function WorkspacePage({
         // Encryption keys are never persisted; this lives only in the open
         // engine session.
         ...(encryptionKey.trim() ? { encryptionKey: encryptionKey.trim() } : {}),
+        ...(encryptedCollections.trim() ? { encryptedCollections: encryptedCollections.trim() } : {}),
       });
       const updated = await refreshDatabases();
       let nextId = isDatabaseProfile(opened) ? opened.id : '';
@@ -142,6 +144,16 @@ export function WorkspacePage({
           />
         </div>
         {error && <div className="inline-error">{error}</div>}
+        <div className="field-row">
+          <span className="field-label">Encrypted collections</span>
+          <input
+            className="field-input"
+            type="text"
+            value={encryptedCollections}
+            placeholder="e.g. app_state, secrets (leave empty to apply key to all)"
+            onChange={(event) => setEncryptedCollections(event.target.value)}
+          />
+        </div>
         <div className="inline-note">
           Click a database row to make it the active profile for the other pages. The encryption
           key is kept in memory for this session only and is never stored.

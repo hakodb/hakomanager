@@ -72,6 +72,11 @@ pub struct DatabaseProfile {
     pub path: String,
     pub read_only: bool,
     pub durability: String,
+    /// Collections opened with the session encryption key. Empty means the
+    /// key was applied to every collection (legacy behaviour).
+    #[serde(default)]
+    pub encrypted_collections: Vec<String>,
+    /// Kept for older clients: true when a key was supplied at open time.
     pub encryption_configured: bool,
 }
 

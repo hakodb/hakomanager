@@ -387,3 +387,47 @@ fn query_select_returns_only_projected_fields() {
         assert!(!data.contains_key("secret"), "select must drop non-selected fields: {row}");
     }
 }
+
+#[test]
+fn query_select_keeps_order_by_outside_projection() {
+    let path = temp_path();
+    let id = open(&path);
+    for (doc_id, name, age) in [("u1", "alice", 30), ("u2", "bob", 40)] {
+        call(json!({
+            "op": "document.put",
+            "args": {
+                "profileId": id,
+                "collection": "users",
+                "id": doc_id,
+                "data": { "name": name, "age": age, "secret": "hidden" }
+            }
+        }));
+    }
+
+    // `age` drives the sort but is NOT selected. The native query path keeps
+    // ranking on the full document and only prunes the returned fields;
+    // the old query_projected_zero_copy workaround sorted on projected
+    // fields and got this wrong.
+    let rows = call(json!({
+        "op": "query.run",
+        "args": {
+            "profileId": id,
+            "spec": {
+                "collection": "users",
+                "filters": [],
+                "order_by": [{ "field": "age", "ascending": false }],
+                "select": ["name"],
+                "limit": 10
+            }
+        }
+    }));
+    let rows = rows.as_array().expect("query rows");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["id"], "u2", "older document must rank first");
+    assert_eq!(rows[0]["data"]["name"], "bob");
+    for row in rows {
+        let data = row["data"].as_object().unwrap();
+        assert!(!data.contains_key("age"), "order field must be pruned: {row}");
+        assert!(!data.contains_key("secret"), "select must drop non-selected fields: {row}");
+    }
+}

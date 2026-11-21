@@ -1,6 +1,6 @@
 [package]
 name = "hakomanager-tauri"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2021"
 description = "Tauri 2 desktop shell for HakoManager"
 

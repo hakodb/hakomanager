@@ -6,7 +6,7 @@ license.workspace = true
 description = "UI-independent core for HakoManager: command dispatch, DTOs and engine adapter"
 
 [dependencies]
-hakodb = "0.21"
+hakodb = "0.21.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
